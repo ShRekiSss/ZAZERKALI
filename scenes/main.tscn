@@ -1,0 +1,106 @@
+[gd_scene load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://scripts/main.gd" id="1_main"]
+
+[node name="Main" type="Control"]
+layout_mode = 3
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+script = ExtResource("1_main")
+
+[node name="Background" type="ColorRect" parent="."]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+color = Color(0.101961, 0.086275, 0.121569, 1)
+
+[node name="Wizard" type="TextureRect" parent="."]
+layout_mode = 0
+offset_left = 250.0
+offset_top = 110.0
+offset_right = 470.0
+offset_bottom = 430.0
+expand_mode = 1
+stretch_mode = 5
+
+[node name="CounterLabel" type="Label" parent="."]
+layout_mode = 1
+anchors_preset = 10
+anchor_right = 1.0
+offset_top = 440.0
+offset_bottom = 520.0
+grow_horizontal = 2
+theme_override_colors/font_color = Color(0.913725, 0.878431, 0.796078, 1)
+theme_override_font_sizes/font_size = 40
+text = "Благосклонность: 0"
+horizontal_alignment = 1
+
+[node name="RateLabel" type="Label" parent="."]
+layout_mode = 1
+anchors_preset = 10
+anchor_right = 1.0
+offset_top = 525.0
+offset_bottom = 565.0
+grow_horizontal = 2
+theme_override_colors/font_color = Color(0.6, 0.56, 0.65, 1)
+theme_override_font_sizes/font_size = 24
+text = "0/сек · сила поклона +1"
+horizontal_alignment = 1
+
+[node name="BowMan" type="TextureRect" parent="."]
+layout_mode = 0
+offset_left = 290.0
+offset_top = 600.0
+offset_right = 430.0
+offset_bottom = 810.0
+expand_mode = 1
+stretch_mode = 5
+
+[node name="StoryLabel" type="Label" parent="."]
+visible = false
+layout_mode = 1
+anchors_preset = 10
+anchor_right = 1.0
+offset_left = 40.0
+offset_top = 880.0
+offset_right = -40.0
+offset_bottom = 1080.0
+grow_horizontal = 2
+theme_override_colors/font_color = Color(0.847059, 0.796078, 0.898039, 1)
+theme_override_font_sizes/font_size = 28
+text = "«…»"
+horizontal_alignment = 1
+vertical_alignment = 1
+autowrap_mode = 2
+
+[node name="UpgradesPanel" type="GridContainer" parent="."]
+layout_mode = 1
+anchors_preset = 12
+anchor_top = 1.0
+anchor_right = 1.0
+anchor_bottom = 1.0
+offset_left = 20.0
+offset_top = -280.0
+offset_right = -20.0
+offset_bottom = -20.0
+grow_horizontal = 2
+grow_vertical = 0
+theme_override_constants/h_separation = 12
+theme_override_constants/v_separation = 12
+columns = 2
+
+[node name="Toon3DButton" type="Button" parent="."]
+layout_mode = 1
+anchors_preset = 0
+offset_left = 20.0
+offset_top = 20.0
+offset_right = 300.0
+offset_bottom = 70.0
+theme_override_font_sizes/font_size = 22
+text = "3D-зеркало (демо)"

@@ -1,0 +1,8 @@
+# Кэш Godot
+.godot/
+*.tmp
+
+# FBX/OBJ из пака Kenney не нужны — Godot использует GLB
+assets/models/Models/FBX format/
+assets/models/Models/OBJ format/
+assets/models/Models/Textures/

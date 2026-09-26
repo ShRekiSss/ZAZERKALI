@@ -1,0 +1,37 @@
+name: Android APK
+
+# Авто-сборка APK в облаке: каждый пуш в main собирает установочный файл.
+# Скачать: вкладка Actions → последний прогон → Artifacts.
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  export-android:
+    name: Сборка debug-APK
+    runs-on: ubuntu-22.04
+    container: barichello/godot-ci:4.6
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          set-safe-directory: true
+
+      - name: Debug keystore
+        run: |
+          mkdir -p .android
+          keytool -genkeypair -keystore .android/debug.keystore -alias androiddebugkey \
+            -storepass android -keypass android -dname "CN=Android Debug,O=Android,C=US" \
+            -keyalg RSA -keysize 2048 -validity 10000
+
+      - name: Export APK
+        run: |
+          mkdir -p builds
+          godot --headless --export-debug "Android" builds/zazerkali-debug.apk
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: zazerkali-apk
+          path: builds/zazerkali-debug.apk
