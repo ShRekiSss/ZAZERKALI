@@ -33,9 +33,9 @@ func _ready() -> void:
 
 
 func _process(delta: float) -> void:
-	# Челик периодически кланяется зеркалу (вращение вокруг ног — ось Z).
+	# Челик периодически кланяется трону (наклон вокруг оси Z, лицом к -X).
 	_bow_t += delta
-	_chelik.rotation.z = -0.5 * absf(sin(_bow_t * 1.6))
+	_chelik.rotation.z = 0.5 * absf(sin(_bow_t * 1.6))
 
 
 func _toon_material(color: Color) -> ShaderMaterial:
@@ -164,11 +164,23 @@ func _setup_wizard() -> void:
 	_mesh(wizard, hat, mat, Vector3(0, 2.35, 0))
 
 
-func _make_character(color: Color) -> Node3D:
-	var root := Node3D.new()
+func _make_character(_color: Color) -> Node3D:
+	# Персонаж из пака Kenney Character Assets: у всех моделей пака ОДИН общий
+	# скелет (BaseCharacter), совместимый с анимациями Mixamo — на него позже
+	# ретаргетим анимацию поклона. Материалы не перекрашиваем: у моделей пака
+	# уже мультяшные плоские текстуры, они и так в нашем стиле.
+	var scene: PackedScene = load(MODELS_DIR + "Textures/Casual_Male.gltf")
+	if scene:
+		var root: Node3D = scene.instantiate()
+		root.position = Vector3(0.8, 0.0, 0.0)
+		# Стоит лицом к трону (в сторону -X). Если увидишь спину — поменяй знак.
+		root.rotation.y = -PI / 2
+		add_child(root)
+		return root
+	# Запасной вариант, если пак не подгрузился: капсула с лицом.
+	root = Node3D.new()
 	add_child(root)
-	var mat := _toon_material(color)
-	# Тело — в сгенерированной текстуре одежды (потёртая ткань, подол, стежки).
+	var mat := _toon_material(Color(0.72, 0.64, 0.49))
 	if _robe_tex:
 		mat.set_shader_parameter("use_texture", true)
 		mat.set_shader_parameter("texture_albedo", _robe_tex)
@@ -177,13 +189,10 @@ func _make_character(color: Color) -> Node3D:
 	body.radius = 0.35
 	body.height = 1.3
 	_mesh(root, body, mat, Vector3(0, 0.65, 0))
-	# Голова — чистый «пергамент», без текстуры одежды.
 	var head := SphereMesh.new()
 	head.radius = 0.28
 	head.height = 0.56
-	_mesh(root, head, _toon_material(color), Vector3(0, 1.55, 0))
-	# Лицо — «наклейка» на плоском четырёхугольнике перед головой,
-	# повёрнута на 45° — видна и камере, и зеркалу.
+	_mesh(root, head, _toon_material(Color(0.72, 0.64, 0.49)), Vector3(0, 1.55, 0))
 	if _face_tex:
 		var face_mat := _toon_material(Color.WHITE)
 		face_mat.set_shader_parameter("use_texture", true)
