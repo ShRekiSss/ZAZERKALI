@@ -40,7 +40,10 @@ func _ready() -> void:
 	_setup_throne_area()
 	_setup_wizard()
 	_chelik = _make_character(Color(0.72, 0.64, 0.49))
-	_chelik.position = Vector3(0.8, 0.0, 0.0)
+	# Композиция вдоль оси Z (портретный экран узкий по X!): челик на переднем плане,
+	# волшебник и трон — в глубине по центральной оси, всё влезает в кадр.
+	_chelik.position.x = 0.0
+	_chelik.position.z = 1.2
 	_setup_mirror()
 	_setup_camera()
 	_setup_ui()
@@ -75,14 +78,11 @@ func _process(delta: float) -> void:
 		_idle_t += delta
 		if _idle_t >= IDLE_BOW_EVERY:
 			_idle_t = 0.0
-			if _chelik_anim == null:
-				_root_bow(0.7, 1.0, 0.85) # медленный глубокий поклон наклоном
-			elif not _chelik_anim.current_animation == _bow_anim:
-				_play_bow()
-	# Запасной визуал поклона, если анимации в модели нет.
-	if _chelik_anim == null and not _root_bowing:
-		_bow_t += delta
-		_chelik.rotation.z = 0.5 * absf(sin(_bow_t * 1.6))
+			if _chelik_anim:
+				if _chelik_anim.current_animation != _bow_anim:
+					_play_bow()
+			else:
+				_root_bow(0.7, 1.0, 0.85) # медленный поклон наклоном
 
 
 func _input(event: InputEvent) -> void:
@@ -113,8 +113,13 @@ func _input(event: InputEvent) -> void:
 func _play_bow() -> void:
 	if _chelik_anim == null:
 		return
-	_chelik_anim.stop()
-	_chelik_anim.play(_bow_anim)
+	# Спам-тапы: не дёргаем плеер stop/play (из-за этого челик зависал в T-позе),
+	# а просто отматываем текущую анимацию в начало.
+	if _chelik_anim.current_animation == _bow_anim and _chelik_anim.is_playing():
+		_chelik_anim.seek(0.0, true)
+	else:
+		_chelik_anim.stop()
+		_chelik_anim.play(_bow_anim)
 
 
 func _on_bow_finished(_anim_name: String) -> void:
@@ -127,11 +132,12 @@ func _root_bow(down := 0.12, up := 0.45, depth := 1.1) -> void:
 	if _root_bowing:
 		return
 	_root_bowing = true
+	# Челик стоит лицом к -Z (к трону), поклон — наклон вперёд вокруг оси X.
 	var tween := create_tween()
-	tween.tween_property(_chelik, "rotation:z", depth, down) \
+	tween.tween_property(_chelik, "rotation:x", -depth, down) \
 		.set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
 	tween.tween_interval(0.05)
-	tween.tween_property(_chelik, "rotation:z", 0.0, up) \
+	tween.tween_property(_chelik, "rotation:x", 0.0, up) \
 		.set_trans(Tween.TRANS_BOUNCE).set_ease(Tween.EASE_OUT)
 	tween.finished.connect(func() -> void: _root_bowing = false)
 
@@ -144,19 +150,14 @@ func _setup_wizard() -> void:
 	if scene:
 		var wizard: Node3D = scene.instantiate()
 		add_child(wizard)
-		wizard.position = Vector3(-2.2, 0.0, -1.9)
-		wizard.rotation.y = PI / 2 # лицом к челику (+X)
+		wizard.position = Vector3(0.0, 0.0, -1.4) # перед троном, лицом к челику (+Z)
+		wizard.rotation.y = PI
 		_fit_model(wizard, 2.3)
 		_wizard = wizard
-		var player := _find_animation_player(wizard)
-		if player and player.get_animation_list().size() > 0:
-			var first := player.get_animation_list()[0]
-			player.get_animation(first).loop_mode = Animation.LOOP_LINEAR
-			player.play(first)
 		return
 	# Запасной волшебник из примитивов.
 	var fallback := Node3D.new()
-	fallback.position = Vector3(-2.2, 0.0, -0.5)
+	fallback.position = Vector3(0.0, 0.0, -1.4)
 	add_child(fallback)
 	_wizard = fallback
 	var mat := _toon_material(Color(0.29, 0.18, 0.33))
@@ -178,8 +179,8 @@ func _make_character(_color: Color) -> Node3D:
 	var scene: PackedScene = load(CHELIK_GLB)
 	if scene:
 		root = scene.instantiate()
-		root.position = Vector3(0.8, 0.0, 0.0)
-		root.rotation.y = -PI / 2 # лицом к трону (-X); спиной — поменять знак
+		root.position = Vector3.ZERO
+		root.rotation.y = PI # лицом к трону (-Z); спиной — поменять знак
 		add_child(root)
 		_fit_model(root, 1.7)
 		_chelik_anim = _find_animation_player(root)
@@ -195,8 +196,8 @@ func _make_character(_color: Color) -> Node3D:
 	scene = load(MODELS_DIR + "Textures/Casual_Male.gltf")
 	if scene:
 		root = scene.instantiate()
-		root.position = Vector3(0.8, 0.0, 0.0)
-		root.rotation.y = -PI / 2
+		root.position = Vector3.ZERO
+		root.rotation.y = PI
 		add_child(root)
 		return root
 	# Последний запасной: капсула.
@@ -319,32 +320,33 @@ func _setup_ground() -> void:
 	_mesh(self, plane, _toon_material(Color(0.18, 0.22, 0.16)), Vector3.ZERO)
 
 
-## Тронный зал: трон на возвышении, ковровая дорожка, колонны, стены, свет.
+## Тронный зал: трон по центральной оси на возвышении, ковровая дорожка,
+## боковые стены, колонны, фонари. Экран портретный — всё строим в глубину.
 func _setup_throne_area() -> void:
 	var stone := _toon_material(Color(0.45, 0.44, 0.48))
 	var wall := Color(0.33, 0.28, 0.36)
 
-	# Задник: арки-стена позади трона.
+	# Торцевая стена: арки позади трона.
 	for i in 4:
-		_prop("wall-arch.glb", Vector3(-4.6 + i * 2.3, 0.0, -4.2), 0.0, wall)
+		_prop("wall-arch.glb", Vector3(-3.45 + i * 2.3, 0.0, -4.2), 0.0, wall)
 
-	# Боковые стены зала (создают «коробку» помещения на камере).
+	# Боковые стены зала.
 	for i in 4:
-		_prop("wall.glb", Vector3(2.9, 0.0, -3.0 + i * 2.0), -90.0, wall)
-		_prop("wall.glb", Vector3(-5.7, 0.0, -3.0 + i * 2.0), 90.0, wall)
+		_prop("wall.glb", Vector3(3.6, 0.0, -3.5 + i * 2.3), -90.0, wall)
+		_prop("wall.glb", Vector3(-3.6, 0.0, -3.5 + i * 2.3), 90.0, wall)
 
-	# Лестница к трону + площадка.
-	_prop("stairs-wide-stone.glb", Vector3(-2.2, 0.0, -1.15), 0.0, Color(0.5, 0.49, 0.52))
+	# Лестница к трону.
+	_prop("stairs-wide-stone.glb", Vector3(0.0, 0.0, -1.15), 0.0, Color(0.5, 0.49, 0.52))
 
 	# Ковровая дорожка от трона к зрителю.
 	var carpet := Node3D.new()
 	add_child(carpet)
-	_box(carpet, Vector3(1.8, 0.04, 5.2), Vector3(-1.4, 0.02, 1.6),
+	_box(carpet, Vector3(1.8, 0.04, 5.6), Vector3(0.0, 0.02, 1.6),
 		_toon_material(Color(0.42, 0.13, 0.18)))
 
-	# Трон: каменный подиум + красное кресло с золотым навершием.
+	# Трон: каменный подиум + красное кресло с золотым навершием (по центру).
 	var throne := Node3D.new()
-	throne.position = Vector3(-2.2, 0.0, -2.6)
+	throne.position = Vector3(0.0, 0.0, -2.6)
 	add_child(throne)
 	var red := _toon_material(Color(0.42, 0.13, 0.18))
 	var gold := _toon_material(Color(0.85, 0.68, 0.3))
@@ -356,17 +358,17 @@ func _setup_throne_area() -> void:
 	_box(throne, Vector3(1.55, 0.25, 0.45), Vector3(0, 3.1, -0.55), gold)
 
 	# Колонны со знамёнами по бокам трона.
-	_prop("pillar-stone.glb", Vector3(-4.4, 0.0, -2.6), 0.0, Color(0.52, 0.51, 0.55))
-	_prop("pillar-stone.glb", Vector3(0.0, 0.0, -2.6), 0.0, Color(0.52, 0.51, 0.55))
-	_prop("banner-red.glb", Vector3(-4.4, 1.6, -2.2), 0.0, Color(0.5, 0.16, 0.2))
-	_prop("banner-red.glb", Vector3(0.0, 1.6, -2.2), 0.0, Color(0.5, 0.16, 0.2))
+	_prop("pillar-stone.glb", Vector3(-2.7, 0.0, -2.6), 0.0, Color(0.52, 0.51, 0.55))
+	_prop("pillar-stone.glb", Vector3(2.7, 0.0, -2.6), 0.0, Color(0.52, 0.51, 0.55))
+	_prop("banner-red.glb", Vector3(-2.7, 1.6, -2.2), 0.0, Color(0.5, 0.16, 0.2))
+	_prop("banner-red.glb", Vector3(2.7, 1.6, -2.2), 0.0, Color(0.5, 0.16, 0.2))
 
 	# Фонари вдоль дорожки + кривое дерево (жутко-милая деталь Fran Bow).
-	_prop("lantern.glb", Vector3(1.8, 0.0, 1.8), 0.0, Color(0.25, 0.22, 0.26))
-	_prop("lantern.glb", Vector3(-3.9, 0.0, 1.4), 0.0, Color(0.25, 0.22, 0.26))
-	_prop("lantern.glb", Vector3(1.8, 0.0, -0.4), 0.0, Color(0.25, 0.22, 0.26))
-	_prop("lantern.glb", Vector3(-3.9, 0.0, -0.8), 0.0, Color(0.25, 0.22, 0.26))
-	_prop("tree-crooked.glb", Vector3(2.6, 0.0, -3.4), 0.0, Color(0.24, 0.3, 0.2))
+	_prop("lantern.glb", Vector3(1.7, 0.0, 1.4), 0.0, Color(0.25, 0.22, 0.26))
+	_prop("lantern.glb", Vector3(-1.7, 0.0, 1.4), 0.0, Color(0.25, 0.22, 0.26))
+	_prop("lantern.glb", Vector3(1.7, 0.0, -0.6), 0.0, Color(0.25, 0.22, 0.26))
+	_prop("lantern.glb", Vector3(-1.7, 0.0, -0.6), 0.0, Color(0.25, 0.22, 0.26))
+	_prop("tree-crooked.glb", Vector3(2.9, 0.0, -3.6), 0.0, Color(0.24, 0.3, 0.2))
 
 
 ## --- Зеркало (SubViewport + «плывущее» отражение) ----------------------
@@ -380,7 +382,7 @@ func _setup_mirror() -> void:
 	var mirror_cam := Camera3D.new()
 	mirror_cam.fov = 55
 	mirror_view.add_child(mirror_cam)
-	mirror_cam.position = Vector3(4.6, 1.6, 0.0)
+	mirror_cam.position = Vector3(4.4, 1.6, 0.6)
 	mirror_cam.rotation.y = PI / 2
 
 	_mirror_mat = ShaderMaterial.new()
@@ -394,7 +396,7 @@ func _setup_mirror() -> void:
 	var screen := MeshInstance3D.new()
 	screen.mesh = quad
 	screen.material_override = _mirror_mat
-	screen.position = Vector3(3.0, 1.7, 0.0)
+	screen.position = Vector3(3.55, 1.7, 0.6)
 	screen.rotation.y = PI / 2
 	add_child(screen)
 
@@ -403,17 +405,18 @@ func _setup_mirror() -> void:
 	var frame := MeshInstance3D.new()
 	frame.mesh = frame_quad
 	frame.material_override = _toon_material(Color(0.16, 0.12, 0.14))
-	frame.position = Vector3(3.04, 1.7, 0.0)
+	frame.position = Vector3(3.59, 1.7, 0.6)
 	frame.rotation.y = PI / 2
 	add_child(frame)
 
 
 func _setup_camera() -> void:
+	# Портретный кадр: камера по центральной оси, смотрит в глубину зала.
 	var cam := Camera3D.new()
 	cam.fov = 55
-	cam.position = Vector3(-2.4, 2.8, 5.4)
+	cam.position = Vector3(0.0, 2.7, 6.6)
 	add_child(cam)
-	cam.look_at(Vector3(0.6, 1.3, -0.8))
+	cam.look_at(Vector3(0.0, 1.2, -0.8))
 	cam.current = true
 
 
