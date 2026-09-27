@@ -41,6 +41,8 @@ var _welw_t := 0.0
 var _slave: Node3D
 var _slave_base_y := 0.0
 var _slave_t := 0.0
+## База по вертикали для «дыхания» волшебника (модель от центра таза)
+var _wizard_base_y := 0.0
 
 ## Звуки: ключ → плеер. Тапы — случайный «шорох ткани» (Kenney CC0),
 ## эмбиент-дрон синтезируется кодом на старте — файлы не нужны.
@@ -187,6 +189,7 @@ func _setup_wizard() -> void:
 		wizard.rotation.y = 0.0
 		_fit_model(wizard, 2.3)
 		_calm_materials(wizard) # гасим блики/прозрачность — «застрявшие текстуры»
+		_wizard_base_y = wizard.position.y # ноги на полу (модель от центра таза!)
 		_wizard = wizard
 		return
 	# Запасной волшебник из примитивов.
@@ -926,11 +929,12 @@ func _setup_fallen_leaves() -> void:
 
 func _update_welwitschia(delta: float) -> void:
 	_welw_t += delta
-	# «Дыхание» волшебника: у модели нет анимаций, оживляем процедурно —
-	# едва заметное покачивание и приподнимание на вдохе
+	# «Дыхание» волшебника: у модели нет анимаций, оживляем процедурно.
+	# ВАЖНО: модель начинается от центра таза — прибавляем к базовой высоте
+	# от _fit_model, а не перезаписываем (иначе проваливается под пол)!
 	if _wizard:
 		_wizard.rotation.z = sin(_welw_t * 0.8) * 0.025
-		_wizard.position.y = absf(sin(_welw_t * 1.1)) * 0.03
+		_wizard.position.y = _wizard_base_y + absf(sin(_welw_t * 1.1)) * 0.03
 	# мерцание свечей
 	for c in _candle_lights:
 		c["light"].light_energy = c["base"] * (
@@ -1095,7 +1099,7 @@ func _setup_slave() -> void:
 		push_warning("Модель раба не найдена: " + SLAVE_GLB)
 		return
 	var root: Node3D = scene.instantiate()
-	root.position = Vector3(-0.9, 0.0, -0.4) # на ковре, левее челика
+	root.position = Vector3(-1.2, 0.0, 0.4) # на ковре, левее челика
 	root.rotation.y = 0.0 # лицом к трону (-Z)
 	add_child(root)
 	_fit_model(root, 1.55)
@@ -1107,23 +1111,24 @@ func _setup_slave() -> void:
 func _update_slave(delta: float) -> void:
 	if _slave == null:
 		return
-	# Цикл 14 с: стоит → плавно на колени (3–6) → молится (6–11) → встаёт (11–14)
+	# Цикл 14 с: стоит → плавно на колени (1–3) → молится (3–12) → встаёт (12–14).
+	# Погружение умеренное (0.3) — модель от центра таза, глубже «зароет» ноги в пол.
 	_slave_t = fmod(_slave_t + delta, 14.0)
 	var t := _slave_t
 	var kneel := 0.0
-	if t < 3.0:
+	if t < 1.0:
 		kneel = 0.0
-	elif t < 6.0:
-		kneel = smoothstep(3.0, 6.0, t)
-	elif t < 11.0:
+	elif t < 3.0:
+		kneel = smoothstep(1.0, 3.0, t)
+	elif t < 12.0:
 		kneel = 1.0
 	else:
-		kneel = 1.0 - smoothstep(11.0, 14.0, t)
-	# опускание на колени + наклон вперёд
-	_slave.position.y = _slave_base_y - kneel * 0.4
+		kneel = 1.0 - smoothstep(12.0, 14.0, t)
+	# опускание на колени + сильный наклон вперёд (прострация)
+	_slave.position.y = _slave_base_y - kneel * 0.3
 	# молитва: мерные покачивания корпусом, пока стоит на коленях
-	var pray := sin(t * 1.6) * 0.08 * kneel
-	_slave.rotation.x = -kneel * 0.3 + pray
+	var pray := sin(t * 1.6) * 0.1 * kneel
+	_slave.rotation.x = -kneel * 0.45 + pray
 	# лёгкое дыхание в любой позе
 	_slave.rotation.z = sin(_slave_t * 1.2) * 0.02
 
