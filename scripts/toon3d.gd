@@ -33,9 +33,15 @@ var _petals: Array[Dictionary] = []
 var _candle_lights: Array[Dictionary] = []
 var _welw_t := 0.0
 
-## Звуки: ключ → плеер. Файлы кладутся в assets/audio/ (см. README);
-## если файла нет — игра молчит и не падает.
+## Звуки: ключ → плеер. Тапы — случайный «шорох ткани» (Kenney CC0),
+## эмбиент-дрон синтезируется кодом на старте — файлы не нужны.
 var _sfx := {}
+var _tap_players: Array[AudioStreamPlayer] = []
+
+## Процедурные текстуры (крыло/лепесток/лист) — рисуются один раз при старте
+var _tex_wing: ImageTexture
+var _tex_petal: ImageTexture
+var _tex_leaf: ImageTexture
 
 ## UI
 var _counter_label: Label
@@ -62,7 +68,7 @@ func _ready() -> void:
 	_setup_audio()
 	GameState.changed.connect(_update_ui)
 	GameState.story_line.connect(_show_story)
-	GameState.story_line.connect(func(_t: String) -> void: _play_sfx("bell"))
+	GameState.story_line.connect(func(_t: String) -> void: _play_sfx("creak"))
 	_update_ui()
 	if DisplayServer.get_name() == "headless":
 		_diag()
@@ -489,7 +495,7 @@ func _setup_ui() -> void:
 		var button := Button.new()
 		button.pressed.connect(func() -> void:
 			if GameState.buy(id):
-				_play_sfx("bell"))
+				_play_sfx("coins"))
 		_upgrades_panel.add_child(button)
 		_buttons[id] = button
 
@@ -592,8 +598,13 @@ func _setup_welwitschia() -> void:
 	for i in 5:
 		_make_butterfly(Vector3(randf_range(-3.0, 3.0), randf_range(1.2, 2.4), randf_range(-3.0, 1.5)))
 
-	# Падающие лепестки
+	# Падающие лепестки и опавшие листья
+	if _tex_petal == null:
+		_tex_petal = _make_petal_texture()
+	if _tex_leaf == null:
+		_tex_leaf = _make_leaf_texture()
 	_setup_petals()
+	_setup_fallen_leaves()
 
 
 ## Искривлённый ствол из сегментов + ветви
@@ -674,30 +685,121 @@ func _make_candelabra(pos: Vector3, with_light: bool) -> void:
 
 
 func _make_butterfly(pos: Vector3) -> void:
+	if _tex_wing == null:
+		_tex_wing = _make_wing_texture()
 	var root := Node3D.new()
 	root.position = pos
 	add_child(root)
 	var mat := StandardMaterial3D.new()
 	mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-	mat.albedo_color = Color(0.55, 0.35, 0.72, 0.8)
-	mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	mat.albedo_texture = _tex_wing
+	mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA_SCISSOR
+	mat.alpha_scissor_threshold = 0.5
 	mat.cull_mode = BaseMaterial3D.CULL_DISABLED
 	var wing := QuadMesh.new()
-	wing.size = Vector2(0.22, 0.3)
+	wing.size = Vector2(0.26, 0.26)
 	var lw := Node3D.new()
 	root.add_child(lw)
-	_mesh(lw, wing, mat, Vector3(-0.11, 0.05, 0))
+	_mesh(lw, wing, mat, Vector3(-0.015, 0.05, 0))
 	var rw := Node3D.new()
 	root.add_child(rw)
-	_mesh(rw, wing, mat, Vector3(0.11, 0.05, 0))
+	var rmi := _mesh(rw, wing, mat, Vector3(0.015, 0.05, 0))
+	rmi.scale = Vector3(-1, 1, 1) # зеркальное правое крыло
+	# Тельце и усики
 	var body := CapsuleMesh.new()
-	body.radius = 0.02
-	body.height = 0.16
-	_mesh(root, body, _toon_material(Color(0.1, 0.08, 0.12)), Vector3.ZERO)
+	body.radius = 0.018
+	body.height = 0.18
+	_mesh(root, body, _toon_material(Color(0.1, 0.08, 0.12)), Vector3(0, 0.02, 0))
+	var ant_mat := _toon_material(Color(0.1, 0.08, 0.12))
+	for side in [-1.0, 1.0]:
+		var ant := CylinderMesh.new()
+		ant.top_radius = 0.002
+		ant.bottom_radius = 0.004
+		ant.height = 0.09
+		var ami := _mesh(root, ant, ant_mat, Vector3(side * 0.012, 0.13, 0))
+		ami.rotation.z = side * 0.5
 	_butterflies.append({
 		"root": root, "lw": lw, "rw": rw, "phase": randf() * TAU,
 		"orbit": randf() < 0.4, "home": pos, "r": randf_range(0.5, 1.2),
 	})
+
+
+## Крыло: силуэт из двух «лопастей», прожилки от корня, тёмная кромка, пятна
+func _make_wing_texture() -> ImageTexture:
+	var size := 128
+	var img := Image.create(size, size, false, Image.FORMAT_RGBA8)
+	var root_x := 10.0
+	var root_y := 64.0
+	for y in size:
+		for x in size:
+			var fx := float(x)
+			var fy := float(y)
+			var d_fore := pow((fx - 62.0) / 54.0, 2.0) + pow((fy - 42.0) / 40.0, 2.0)
+			var d_hind := pow((fx - 44.0) / 38.0, 2.0) + pow((fy - 94.0) / 32.0, 2.0)
+			if d_fore > 1.0 and d_hind > 1.0:
+				continue
+			var dist := sqrt(pow(fx - root_x, 2.0) + pow(fy - root_y, 2.0)) / 110.0
+			var col := Color(0.6 - 0.28 * dist, 0.38 - 0.2 * dist, 0.75 - 0.32 * dist, 0.92)
+			var vein := false
+			for ang in [-0.55, -0.2, 0.15, 0.5]:
+				var vx := cos(ang)
+				var vy := sin(ang)
+				var t := (fx - root_x) * vx + (fy - root_y) * vy
+				if t > 0.0:
+					var px := root_x + vx * t
+					var py := root_y + vy * t
+					if Vector2(fx - px, fy - py).length() < 1.6:
+						vein = true
+						break
+			if vein:
+				col = Color(0.15, 0.1, 0.2, 0.95)
+			elif d_fore > 0.86 or d_hind > 0.82:
+				col = Color(0.2, 0.12, 0.26, 0.95)
+			if Vector2(fx - 86.0, fy - 34.0).length() < 5.0 \
+					or Vector2(fx - 66.0, fy - 104.0).length() < 4.0:
+				col = Color(0.85, 0.78, 0.55, 0.95)
+			img.set_pixel(x, y, col)
+	return ImageTexture.create_from_image(img)
+
+
+## Лепесток: капля с тёмными загнутыми краями
+func _make_petal_texture() -> ImageTexture:
+	var size := 64
+	var img := Image.create(size, size, false, Image.FORMAT_RGBA8)
+	for y in size:
+		for x in size:
+			var fx := (float(x) / size - 0.5) * 2.0
+			var fy := (float(y) / size - 0.5) * 2.0
+			var belly := pow(fx, 2.0) / 0.3 + pow(fy - 0.2, 2.0) / 0.75
+			var tip := absf(fx) < 0.1 + 0.13 * (-fy) and fy < -0.05 and fy > -1.0
+			if belly <= 1.0 or tip:
+				var shade := clampf(0.85 + 0.2 * fy, 0.55, 1.0)
+				var col := Color(0.42 * shade + 0.05, 0.05 * shade + 0.01, 0.1 * shade + 0.02, 0.96)
+				if absf(fx) > 0.5:
+					col = col.darkened(0.4)
+				img.set_pixel(x, y, col)
+	return ImageTexture.create_from_image(img)
+
+
+## Опавший лист: ромб с жилкой и подгоревшими краями
+func _make_leaf_texture() -> ImageTexture:
+	var size := 64
+	var img := Image.create(size, size, false, Image.FORMAT_RGBA8)
+	for y in size:
+		for x in size:
+			var fx := (float(x) / size - 0.5) * 2.0
+			var fy := (float(y) / size - 0.5) * 2.0
+			var w := 0.42 * (1.0 - absf(fy))
+			if absf(fx) <= w:
+				var col := Color(0.36, 0.3, 0.14)
+				if fy < 0.0:
+					col = Color(0.42, 0.34, 0.13)
+				if absf(fx) > w * 0.62:
+					col = col.darkened(0.3)
+				elif absf(fx) < 0.04:
+					col = Color(0.24, 0.2, 0.1)
+				img.set_pixel(x, y, col)
+	return ImageTexture.create_from_image(img)
 
 
 func _setup_petals() -> void:
@@ -705,10 +807,12 @@ func _setup_petals() -> void:
 	var mm := MultiMesh.new()
 	mm.transform_format = MultiMesh.TRANSFORM_3D
 	var quad := QuadMesh.new()
-	quad.size = Vector2(0.07, 0.1)
+	quad.size = Vector2(0.075, 0.11)
 	var pm := StandardMaterial3D.new()
 	pm.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-	pm.albedo_color = Color(0.45, 0.09, 0.14)
+	pm.albedo_texture = _tex_petal
+	pm.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA_SCISSOR
+	pm.alpha_scissor_threshold = 0.5
 	pm.billboard_mode = BaseMaterial3D.BILLBOARD_ENABLED
 	pm.cull_mode = BaseMaterial3D.CULL_DISABLED
 	quad.material = pm
@@ -719,11 +823,44 @@ func _setup_petals() -> void:
 	for i in 90:
 		var p := {
 			"x": randf_range(-10.0, 10.0), "y": randf_range(0.5, 8.0), "z": randf_range(-9.0, 5.0),
-			"speed": randf_range(0.25, 0.7), "sway": randf_range(0.3, 0.8),
-			"phase": randf() * TAU, "spin": randf() * TAU, "rspeed": randf_range(-2.0, 2.0),
+			"speed": randf_range(0.12, 0.3), "sway": randf_range(0.3, 0.8),
+			"phase": randf() * TAU, "spin": randf() * TAU, "rspeed": randf_range(-0.8, 0.8),
 		}
 		_petals.append(p)
 		mm.set_instance_transform(i, Transform3D(Basis(), Vector3(p["x"], p["y"], p["z"])))
+
+
+## Статичные опавшие листья — разбросаны по плитам
+func _setup_fallen_leaves() -> void:
+	var leaf_mm := MultiMeshInstance3D.new()
+	var lmm := MultiMesh.new()
+	lmm.transform_format = MultiMesh.TRANSFORM_3D
+	lmm.use_colors = true
+	var lquad := QuadMesh.new()
+	lquad.size = Vector2(0.1, 0.14)
+	var lm := StandardMaterial3D.new()
+	lm.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	lm.albedo_texture = _tex_leaf
+	lm.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA_SCISSOR
+	lm.alpha_scissor_threshold = 0.5
+	lm.cull_mode = BaseMaterial3D.CULL_DISABLED
+	lquad.material = lm
+	lmm.mesh = lquad
+	lmm.instance_count = 70
+	leaf_mm.multimesh = lmm
+	add_child(leaf_mm)
+	var leaf_colors := [
+		Color(1.15, 1.0, 0.85), Color(0.8, 1.1, 0.7),
+		Color(1.1, 0.75, 0.6), Color(0.75, 0.7, 0.65),
+	]
+	for i in 70:
+		var a := randf() * TAU
+		var r := randf_range(1.6, 10.5)
+		var basis := Basis(Vector3.UP, randf() * TAU) \
+			.rotated(Vector3.RIGHT, -PI / 2.0 + randf_range(-0.25, 0.25))
+		var t := Transform3D(basis, Vector3(cos(a) * r, 0.06 + randf() * 0.05, sin(a) * r - 1.0))
+		lmm.set_instance_transform(i, t)
+		lmm.set_instance_color(i, leaf_colors[i % 4] * randf_range(0.8, 1.2))
 
 
 func _update_welwitschia(delta: float) -> void:
@@ -733,15 +870,17 @@ func _update_welwitschia(delta: float) -> void:
 		c["light"].light_energy = c["base"] * (
 			0.85 + 0.1 * sin(_welw_t * 10.0 + c["phase"])
 			+ 0.05 * sin(_welw_t * 23.0 + c["phase"] * 2.0))
-	# бабочки: трепет крыльев, часть кружит
+	# бабочки: мягкий трепет с «проплывами», часть кружит
 	for b in _butterflies:
-		var flap := sin(_welw_t * 9.0 + b["phase"])
-		b["lw"].rotation.y = 0.9 * flap
-		b["rw"].rotation.y = -0.9 * flap
+		var glide := 0.45 + 0.55 * absf(sin(_welw_t * 0.7 + b["phase"] * 0.3))
+		var flap := sin(_welw_t * 6.0 + b["phase"]) * glide
+		b["lw"].rotation.y = 0.6 * flap
+		b["rw"].rotation.y = -0.6 * flap
+		var bob: float = sin(_welw_t * 1.1 + b["phase"]) * 0.08
 		if b["orbit"]:
-			var a: float = _welw_t * 0.4 + b["phase"]
+			var a: float = _welw_t * 0.35 + b["phase"]
 			b["root"].position = b["home"] + Vector3(
-				cos(a) * b["r"], sin(_welw_t * 1.3 + b["phase"]) * 0.2, sin(a) * b["r"])
+				cos(a) * b["r"], bob, sin(a) * b["r"])
 			b["root"].rotation.y = -a + PI / 2.0
 	# падающие лепестки
 	if _petal_mm:
@@ -760,35 +899,67 @@ func _update_welwitschia(delta: float) -> void:
 
 
 ## ================= ЗВУК =================
-## Достаточно положить 3 файла в assets/audio/ (имена точные!):
-##   tap.wav     — короткий «шорох/свист» на тап (freesound: "cloth swish short")
-##   bell.wav    — один удар колокола (freesound: "church bell single hit")
-##   ambient.ogg — зловещий дрон-луп (freesound: "dark ambient drone loop")
+## Тапы: cloth1-4.ogg (Kenney RPG Audio, CC0). Покупка: coins.ogg.
+## Сюжет: creak.ogg. Эмбиент-дрон синтезируется кодом — файлов и лицензий не нужно.
 func _setup_audio() -> void:
-	for key in ["tap", "bell"]:
-		var wav_path := "res://assets/audio/%s.wav" % key
-		if not FileAccess.file_exists(wav_path):
-			continue
-		var stream: AudioStream = load(wav_path)
-		if stream:
+	for i in range(1, 5):
+		var cloth_path := "res://assets/audio/cloth%d.ogg" % i
+		if FileAccess.file_exists(cloth_path):
+			var cp := AudioStreamPlayer.new()
+			cp.stream = load(cloth_path)
+			cp.volume_db = -8.0
+			add_child(cp)
+			_tap_players.append(cp)
+	for pair in [["coins", -6.0], ["creak", -4.0]]:
+		var path := "res://assets/audio/%s.ogg" % pair[0]
+		if FileAccess.file_exists(path):
 			var p := AudioStreamPlayer.new()
-			p.stream = stream
-			p.volume_db = -6.0
+			p.stream = load(path)
+			p.volume_db = pair[1]
 			add_child(p)
-			_sfx[key] = p
-	var amb_path := "res://assets/audio/ambient.ogg"
-	if FileAccess.file_exists(amb_path):
-		var amb: AudioStream = load(amb_path)
-		if amb:
-			var a := AudioStreamPlayer.new()
-			a.stream = amb
-			a.volume_db = -12.0
-			add_child(a)
-			# без зацикливания в импорте — перезапускаем вручную
-			a.finished.connect(a.play)
-			a.play()
+			_sfx[pair[0]] = p
+	# Зловещий дрон: детюненные низкие тоны + медленные «приливы»
+	var a := AudioStreamPlayer.new()
+	a.stream = _make_ambient_stream()
+	a.volume_db = -14.0
+	add_child(a)
+	a.play()
+
+
+## Генерируем 24-секундный бесшовный луп: все частоты — целые герцы,
+## поэтому период ровно укладывается в длину лупа и стыка не слышно.
+func _make_ambient_stream() -> AudioStreamWAV:
+	var rate := 22050
+	var seconds := 24.0
+	var n := int(rate * seconds)
+	var data := PackedByteArray()
+	data.resize(n * 2)
+	for i in n:
+		var t := float(i) / rate
+		var v := 0.0
+		v += sin(TAU * 55.0 * t)          # низкий гул
+		v += 0.7 * sin(TAU * 56.0 * t)    # биения 1 Гц — «тревожность»
+		v += 0.5 * sin(TAU * 82.0 * t)
+		v += 0.35 * sin(TAU * 41.0 * t)
+		var swell := 0.6 + 0.4 * sin(TAU * t / seconds)      # один «прилив» за луп
+		var tremble := 1.0 + 0.15 * sin(TAU * 3.0 * t)       # едва заметная дрожь
+		v *= 0.22 * swell * tremble
+		var s := int(clampf(v, -1.0, 1.0) * 32000.0)
+		data.encode_s16(i * 2, s)
+	var wav := AudioStreamWAV.new()
+	wav.format = AudioStreamWAV.FORMAT_16_BITS
+	wav.mix_rate = rate
+	wav.stereo = false
+	wav.loop_mode = AudioStreamWAV.LOOP_FORWARD
+	wav.loop_begin = 0
+	wav.loop_end = n
+	wav.data = data
+	return wav
 
 
 func _play_sfx(key: String) -> void:
-	if _sfx.has(key):
+	if key == "tap":
+		if not _tap_players.is_empty():
+			_tap_players.pick_random().play()
+	elif _sfx.has(key):
 		_sfx[key].play()
