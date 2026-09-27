@@ -15,6 +15,9 @@ const WIZARD_GLB := "res://assets/models/meshy/wizard_meshy.glb"
 ## Через сколько секунд без тапов челик сам делает поклон.
 const IDLE_BOW_EVERY := 2.5
 
+## Настройки громкости сохраняются сюда (шины Master/Music/SFX)
+const SETTINGS_PATH := "user://settings.cfg"
+
 var _chelik: Node3D
 var _chelik_anim: AnimationPlayer
 var _idle_anim := ""
@@ -64,8 +67,8 @@ func _ready() -> void:
 	_chelik.position.z = 1.2
 	_setup_mirror()
 	_setup_camera()
-	_setup_ui()
 	_setup_audio()
+	_setup_ui()
 	GameState.changed.connect(_update_ui)
 	GameState.story_line.connect(_show_story)
 	GameState.story_line.connect(func(_t: String) -> void: _play_sfx("creak"))
@@ -521,6 +524,48 @@ func _setup_ui() -> void:
 		func() -> void: get_tree().change_scene_to_file("res://scenes/main.tscn"))
 	layer.add_child(flat)
 
+	# --- Настройки звука ---
+	var gear := Button.new()
+	gear.text = "Настройки звука"
+	gear.set_anchors_and_offsets_preset(Control.PRESET_TOP_RIGHT, Control.PRESET_MODE_MINSIZE, 20)
+	layer.add_child(gear)
+
+	var panel := PanelContainer.new()
+	panel.visible = false
+	panel.set_anchors_and_offsets_preset(Control.PRESET_TOP_RIGHT, Control.PRESET_MODE_MINSIZE, 58)
+	layer.add_child(panel)
+
+	var margin := MarginContainer.new()
+	for side in ["margin_left", "margin_right", "margin_top", "margin_bottom"]:
+		margin.add_theme_constant_override(side, 14)
+	panel.add_child(margin)
+	var vbox := VBoxContainer.new()
+	vbox.add_theme_constant_override("separation", 6)
+	margin.add_child(vbox)
+
+	var title := Label.new()
+	title.text = "Настройки"
+	title.add_theme_font_size_override("font_size", 24)
+	vbox.add_child(title)
+
+	for row in [["Общая громкость", "Master"], ["Музыка", "Music"], ["Эффекты", "SFX"]]:
+		var lbl := Label.new()
+		lbl.text = row[0]
+		lbl.add_theme_font_size_override("font_size", 17)
+		vbox.add_child(lbl)
+		var slider := HSlider.new()
+		slider.min_value = 0.0
+		slider.max_value = 1.0
+		slider.step = 0.05
+		slider.value = _bus_volume(row[1])
+		slider.custom_minimum_size = Vector2(250, 24)
+		slider.value_changed.connect(func(v: float) -> void:
+			_set_bus_volume(row[1], v)
+			_save_settings())
+		vbox.add_child(slider)
+
+	gear.pressed.connect(func() -> void: panel.visible = not panel.visible)
+
 
 func _update_ui() -> void:
 	_counter_label.text = "Благосклонность: %s" % _fmt(GameState.favor)
@@ -909,14 +954,31 @@ func _update_welwitschia(delta: float) -> void:
 
 
 ## ================= ЗВУК =================
-## Тапы: cloth1-4.ogg (Kenney RPG Audio, CC0). Покупка: coins.ogg.
-## Сюжет: creak.ogg. Эмбиент-дрон синтезируется кодом — файлов и лицензий не нужно.
+## Шины: Master (всё) → Music (главная тема) и SFX (эффекты).
+## Тема: theme.wav (трек пользователя). Если файла нет — синтез-дрон.
+## Эффекты: cloth1-4.ogg (Kenney CC0), coins.ogg, creak.ogg.
 func _setup_audio() -> void:
+	_ensure_bus("Music")
+	_ensure_bus("SFX")
+
+	var theme_path := "res://assets/audio/theme.wav"
+	var a := AudioStreamPlayer.new()
+	a.bus = "Music"
+	if FileAccess.file_exists(theme_path):
+		a.stream = load(theme_path) # главная тема: Vaanrile — Drowning Into Despair
+	else:
+		a.stream = _make_ambient_stream() # запасной синтез-дрон
+	a.volume_db = -8.0
+	add_child(a)
+	a.finished.connect(a.play) # повтор по окончании (луп)
+	a.play()
+
 	for i in range(1, 5):
 		var cloth_path := "res://assets/audio/cloth%d.ogg" % i
 		if FileAccess.file_exists(cloth_path):
 			var cp := AudioStreamPlayer.new()
 			cp.stream = load(cloth_path)
+			cp.bus = "SFX"
 			cp.volume_db = -8.0
 			add_child(cp)
 			_tap_players.append(cp)
@@ -925,15 +987,52 @@ func _setup_audio() -> void:
 		if FileAccess.file_exists(path):
 			var p := AudioStreamPlayer.new()
 			p.stream = load(path)
+			p.bus = "SFX"
 			p.volume_db = pair[1]
 			add_child(p)
 			_sfx[pair[0]] = p
-	# Зловещий дрон: детюненные низкие тоны + медленные «приливы»
-	var a := AudioStreamPlayer.new()
-	a.stream = _make_ambient_stream()
-	a.volume_db = -14.0
-	add_child(a)
-	a.play()
+
+	_apply_saved_volumes()
+
+
+func _ensure_bus(bus_name: String) -> int:
+	var idx := AudioServer.get_bus_index(bus_name)
+	if idx == -1:
+		AudioServer.add_bus()
+		idx = AudioServer.bus_count - 1
+		AudioServer.set_bus_name(idx, bus_name)
+		AudioServer.set_bus_send(idx, "Master")
+	return idx
+
+
+func _bus_volume(bus_name: String) -> float:
+	var idx := AudioServer.get_bus_index(bus_name)
+	if idx == -1 or AudioServer.is_bus_mute(idx):
+		return 0.0
+	return db_to_linear(AudioServer.get_bus_volume_db(idx))
+
+
+func _set_bus_volume(bus_name: String, v: float) -> void:
+	var idx := AudioServer.get_bus_index(bus_name)
+	if idx == -1:
+		return
+	AudioServer.set_bus_mute(idx, v <= 0.001)
+	if v > 0.001:
+		AudioServer.set_bus_volume_db(idx, linear_to_db(v))
+
+
+func _apply_saved_volumes() -> void:
+	var cfg := ConfigFile.new()
+	if cfg.load(SETTINGS_PATH) == OK:
+		for bus_name in ["Master", "Music", "SFX"]:
+			_set_bus_volume(bus_name, float(cfg.get_value("audio", bus_name.to_lower(), 1.0)))
+
+
+func _save_settings() -> void:
+	var cfg := ConfigFile.new()
+	for bus_name in ["Master", "Music", "SFX"]:
+		cfg.set_value("audio", bus_name.to_lower(), _bus_volume(bus_name))
+	cfg.save(SETTINGS_PATH)
 
 
 ## Генерируем 24-секундный бесшовный луп: все частоты — целые герцы,

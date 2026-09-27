@@ -1,0 +1,4 @@
+Главная тема игры:
+- "Vaanrile - 04 Drowning Into Despair" (theme.wav) — трек выбран автором проекта
+- Звуки cloth/coins/creak: Kenney (kenney.nl), лицензия CC0
+- Эмбиент-дрон (запасной вариант, если theme.wav отсутствует): синтезируется кодом
