@@ -7,8 +7,13 @@ const TOON_SHADER := preload("res://assets/shaders/toon.gdshader")
 const MIRROR_SHADER := preload("res://assets/shaders/mirror.gdshader")
 ## Пак Kenney (CC0): модели подхватываются отсюда.
 const MODELS_DIR := "res://assets/models/Models/GLB format/"
+## Meshy-модели пользователя: волшебник (риг + анимации) и челик.
+const WIZARD_GLB := "res://assets/models/meshy/wizard_meshy.glb"
+const CHELIK_GLB := "res://assets/models/meshy/chelik_meshy.glb"
 
 var _chelik: Node3D
+var _chelik_anim: AnimationPlayer
+var _wizard: Node3D
 var _mirror_mat: ShaderMaterial
 var _env: Environment
 var _bow_t := 0.0
@@ -30,12 +35,23 @@ func _ready() -> void:
 	_setup_mirror()
 	_setup_camera()
 	_setup_ui()
+	# Диагностика для headless-теста (godot --headless): видно, что загрузилось.
+	if DisplayServer.get_name() == "headless":
+		var chelik_player := _find_animation_player(_chelik)
+		print("CHELIK: ", _chelik.name,
+			" | анимации: ", chelik_player.get_animation_list() if chelik_player else ["нет"],
+			" | поклон играет: ", _chelik_anim != null)
+		var wizard_player := _find_animation_player(_wizard) if _wizard else null
+		print("WIZARD: ", _wizard.name if _wizard else "не найден (fallback-примитивы)",
+			" | анимации: ", wizard_player.get_animation_list() if wizard_player else ["нет"],
+			" | scale: ", _wizard.scale if _wizard else "-")
 
 
 func _process(delta: float) -> void:
-	# Челик периодически кланяется трону (наклон вокруг оси Z, лицом к -X).
+	# Челик кланяется: настоящей анимацией из модели (если есть) или наклоном.
 	_bow_t += delta
-	_chelik.rotation.z = 0.5 * absf(sin(_bow_t * 1.6))
+	if _chelik_anim == null:
+		_chelik.rotation.z = 0.5 * absf(sin(_bow_t * 1.6))
 
 
 func _toon_material(color: Color) -> ShaderMaterial:
@@ -148,30 +164,104 @@ func _setup_throne_area() -> void:
 
 
 func _setup_wizard() -> void:
-	var wizard := Node3D.new()
-	wizard.position = Vector3(-2.2, 0.0, -0.5)
-	add_child(wizard)
+	# Великий Волшебник — Meshy-модель пользователя (риг + анимации).
+	# Материалы НЕ перекрашиваем: у модели свои текстуры.
+	var scene: PackedScene = load(WIZARD_GLB)
+	if scene:
+		var wizard: Node3D = scene.instantiate()
+		add_child(wizard)
+		wizard.position = Vector3(-2.2, 0.0, -1.9)
+		wizard.rotation.y = PI / 2 # лицом к челику (+X)
+		_fit_model(wizard, 2.3)
+		_wizard = wizard
+		var player := _find_animation_player(wizard)
+		if player and player.get_animation_list().size() > 0:
+			player.get_animation(player.get_animation_list()[0]).loop_mode = Animation.LOOP_LINEAR
+			player.play(player.get_animation_list()[0])
+		return
+	# Запасной волшебник из примитивов, если модель не подгрузилась.
+	var fallback := Node3D.new()
+	fallback.position = Vector3(-2.2, 0.0, -0.5)
+	add_child(fallback)
 	var mat := _toon_material(Color(0.29, 0.18, 0.33))
 	var robe := CylinderMesh.new()
 	robe.top_radius = 0.25
 	robe.bottom_radius = 0.55
 	robe.height = 2.1
-	_mesh(wizard, robe, mat, Vector3(0, 1.05, 0))
+	_mesh(fallback, robe, mat, Vector3(0, 1.05, 0))
 	var hat := CylinderMesh.new()
 	hat.top_radius = 0.03
 	hat.bottom_radius = 0.55
 	hat.height = 0.6
-	_mesh(wizard, hat, mat, Vector3(0, 2.35, 0))
+	_mesh(fallback, hat, mat, Vector3(0, 2.35, 0))
+
+
+## Ищет AnimationPlayer где-то в детях (Meshy кладёт его внутри иерархии).
+func _find_animation_player(node: Node) -> AnimationPlayer:
+	if node is AnimationPlayer:
+		return node
+	for child in node.get_children():
+		var found := _find_animation_player(child)
+		if found:
+			return found
+	return null
+
+
+## Meshy-модели бывают любого масштаба: нормируем рост и ставим на пол.
+func _fit_model(root: Node3D, target_height: float) -> void:
+	var boxes: Array[AABB] = []
+	_collect_aabb(root, Transform3D(), boxes)
+	if boxes.is_empty():
+		return
+	var box := boxes[0]
+	for b in boxes:
+		box = box.merge(b)
+	if box.size.y < 0.001:
+		return
+	var scale_factor := target_height / box.size.y
+	root.scale = Vector3.ONE * scale_factor
+	root.position.y = -box.position.y * scale_factor
+
+
+func _collect_aabb(node: Node3D, xform: Transform3D, acc: Array[AABB]) -> void:
+	if node is MeshInstance3D:
+		acc.append(xform * (node as MeshInstance3D).get_aabb())
+	for child in node.get_children():
+		if child is Node3D:
+			_collect_aabb(child, xform * (child as Node3D).transform, acc)
+
+
+## Проигрывает анимацию поклона, если она есть в модели (ищем "bow" в имени).
+func _try_play_bow(root: Node3D) -> AnimationPlayer:
+	var player := _find_animation_player(root)
+	if player == null:
+		return null
+	for anim_name in player.get_animation_list():
+		if "bow" in anim_name.to_lower():
+			player.get_animation(anim_name).loop_mode = Animation.LOOP_LINEAR
+			player.play(anim_name)
+			return player
+	return null
 
 
 func _make_character(_color: Color) -> Node3D:
-	# Персонаж из пака Kenney Character Assets: у всех моделей пака ОДИН общий
-	# скелет (BaseCharacter), совместимый с анимациями Mixamo — на него позже
-	# ретаргетим анимацию поклона. Материалы не перекрашиваем: у моделей пака
-	# уже мультяшные плоские текстуры, они и так в нашем стиле.
-	var scene: PackedScene = load(MODELS_DIR + "Textures/Casual_Male.gltf")
+	# Челик — Meshy-модель пользователя. Если внутри есть анимация поклона —
+	# играем её, иначе кланяемся наклоном корня (в _process).
+	var root: Node3D
+	var scene: PackedScene = load(CHELIK_GLB)
 	if scene:
-		var root: Node3D = scene.instantiate()
+		root = scene.instantiate()
+		root.position = Vector3(0.8, 0.0, 0.0)
+		# Стоит лицом к трону (в сторону -X). Если увидишь спину — поменяй знак.
+		root.rotation.y = -PI / 2
+		add_child(root)
+		_fit_model(root, 1.7)
+		_chelik_anim = _try_play_bow(root)
+		return root
+	# Запасной вариант: персонаж из Kenney Character Assets (общий скелет Mixamo).
+	scene = load(MODELS_DIR + "Textures/Casual_Male.gltf")
+	if scene:
+		root = scene.instantiate()
 		root.position = Vector3(0.8, 0.0, 0.0)
 		# Стоит лицом к трону (в сторону -X). Если увидишь спину — поменяй знак.
 		root.rotation.y = -PI / 2
