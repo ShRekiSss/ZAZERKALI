@@ -43,6 +43,8 @@ var _slave_base_y := 0.0
 var _slave_t := 0.0
 ## База по вертикали для «дыхания» волшебника (модель от центра таза)
 var _wizard_base_y := 0.0
+## Камера сцены — для отсечки лепестков возле объектива
+var _cam: Camera3D
 
 ## Звуки: ключ → плеер. Тапы — случайный «шорох ткани» (Kenney CC0),
 ## эмбиент-дрон синтезируется кодом на старте — файлы не нужны.
@@ -466,6 +468,7 @@ func _setup_camera() -> void:
 	add_child(cam)
 	cam.look_at(Vector3(0.0, 1.2, -0.8))
 	cam.current = true
+	_cam = cam
 
 
 ## --- UI кликера --------------------------------------------------------
@@ -952,17 +955,22 @@ func _update_welwitschia(delta: float) -> void:
 			b["root"].position = b["home"] + Vector3(
 				cos(a) * b["r"], bob, sin(a) * b["r"])
 			b["root"].rotation.y = -a + PI / 2.0
-	# падающие лепестки
+	# падающие лепестки; лепесток у самого объектива выглядит гигантским
+	# пятном — рядом с камерой сразу переносим наверх
+	var cam_pos := _cam.global_position if _cam else Vector3(0, 2.7, 6.6)
 	if _petal_mm:
 		var mm := _petal_mm.multimesh
 		for i in _petals.size():
 			var p: Dictionary = _petals[i]
 			p["y"] -= p["speed"] * delta
 			p["x"] += sin(_welw_t * p["sway"] + p["phase"]) * 0.3 * delta
-			if p["y"] < 0.12:
+			var dx: float = p["x"] - cam_pos.x
+			var dy: float = p["y"] - cam_pos.y
+			var dz: float = p["z"] - cam_pos.z
+			if p["y"] < 0.12 or dx * dx + dy * dy + dz * dz < 2.25:
 				p["y"] = randf_range(5.0, 8.0)
 				p["x"] = randf_range(-10.0, 10.0)
-				p["z"] = randf_range(-9.0, 5.0)
+				p["z"] = randf_range(-9.0, 2.5)
 			p["spin"] += p["rspeed"] * delta
 			var basis := Basis(Vector3.UP, p["spin"])
 			mm.set_instance_transform(i, Transform3D(basis, Vector3(p["x"], p["y"], p["z"])))
