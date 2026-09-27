@@ -33,6 +33,10 @@ var _petals: Array[Dictionary] = []
 var _candle_lights: Array[Dictionary] = []
 var _welw_t := 0.0
 
+## Звуки: ключ → плеер. Файлы кладутся в assets/audio/ (см. README);
+## если файла нет — игра молчит и не падает.
+var _sfx := {}
+
 ## UI
 var _counter_label: Label
 var _rate_label: Label
@@ -55,8 +59,10 @@ func _ready() -> void:
 	_setup_mirror()
 	_setup_camera()
 	_setup_ui()
+	_setup_audio()
 	GameState.changed.connect(_update_ui)
 	GameState.story_line.connect(_show_story)
+	GameState.story_line.connect(func(_t: String) -> void: _play_sfx("bell"))
 	_update_ui()
 	if DisplayServer.get_name() == "headless":
 		_diag()
@@ -111,6 +117,7 @@ func _input(event: InputEvent) -> void:
 			return
 	_idle_t = 0.0
 	GameState.add_tap()
+	_play_sfx("tap")
 	if _chelik_anim:
 		_play_bow()
 	else:
@@ -159,8 +166,8 @@ func _setup_wizard() -> void:
 	if scene:
 		var wizard: Node3D = scene.instantiate()
 		add_child(wizard)
-		wizard.position = Vector3(0.0, 0.0, -1.4) # перед троном, лицом к челику (+Z)
-		wizard.rotation.y = PI
+		wizard.position = Vector3(0.0, 0.0, -1.4) # перед троном, СПИНОЙ к камере (смотрит на трон)
+		wizard.rotation.y = 0.0
 		_fit_model(wizard, 2.3)
 		_wizard = wizard
 		return
@@ -308,21 +315,24 @@ func _box(parent: Node3D, size: Vector3, pos: Vector3, mat: Material) -> void:
 func _setup_environment() -> void:
 	_env = Environment.new()
 	_env.background_mode = Environment.BG_COLOR
-	_env.background_color = Color(0.07, 0.055, 0.1)
+	_env.background_color = Color(0.05, 0.04, 0.075)
 	_env.ambient_light_source = Environment.AMBIENT_SOURCE_COLOR
-	_env.ambient_light_color = Color(0.55, 0.5, 0.6)
-	_env.ambient_light_energy = 0.35
-	# Туман Welwitschia Goth: фиолетовая дымка в глубине зала
+	_env.ambient_light_color = Color(0.45, 0.4, 0.52)
+	_env.ambient_light_energy = 0.22
+	# Зловещий фиолетовый туман погуще
 	_env.fog_enabled = true
-	_env.fog_light_color = Color(0.14, 0.11, 0.2)
-	_env.fog_density = 0.012
+	_env.fog_light_color = Color(0.09, 0.07, 0.14)
+	_env.fog_density = 0.02
+	# Приглушаем общую яркость — зловещесть
+	_env.tonemap_exposure = 0.9
 	var world_env := WorldEnvironment.new()
 	world_env.environment = _env
 	add_child(world_env)
 
 	var sun := DirectionalLight3D.new()
 	sun.rotation_degrees = Vector3(-45, -30, 0)
-	sun.light_energy = 1.1
+	sun.light_energy = 0.8
+	sun.light_color = Color(0.75, 0.68, 0.9)
 	sun.shadow_enabled = true
 	add_child(sun)
 
@@ -330,7 +340,7 @@ func _setup_environment() -> void:
 func _setup_ground() -> void:
 	var plane := PlaneMesh.new()
 	plane.size = Vector2(24, 24)
-	_mesh(self, plane, _toon_material(Color(0.15, 0.13, 0.18)), Vector3.ZERO)
+	_mesh(self, plane, _toon_material(Color(0.11, 0.1, 0.14)), Vector3.ZERO)
 
 
 ## Тронный зал: трон по центральной оси на возвышении, ковровая дорожка,
@@ -355,14 +365,14 @@ func _setup_throne_area() -> void:
 	var carpet := Node3D.new()
 	add_child(carpet)
 	_box(carpet, Vector3(1.8, 0.04, 5.6), Vector3(0.0, 0.02, 1.6),
-		_toon_material(Color(0.42, 0.13, 0.18)))
+		_toon_material(Color(0.28, 0.07, 0.11)))
 
 	# Трон: каменный подиум + красное кресло с золотым навершием (по центру).
 	var throne := Node3D.new()
 	throne.position = Vector3(0.0, 0.0, -2.6)
 	add_child(throne)
-	var red := _toon_material(Color(0.42, 0.13, 0.18))
-	var gold := _toon_material(Color(0.85, 0.68, 0.3))
+	var red := _toon_material(Color(0.3, 0.08, 0.12))
+	var gold := _toon_material(Color(0.52, 0.4, 0.15))
 	_box(throne, Vector3(3.2, 0.4, 2.2), Vector3(0, 0.2, 0), stone)
 	_box(throne, Vector3(1.4, 0.5, 1.2), Vector3(0, 0.65, 0), red)
 	_box(throne, Vector3(1.4, 2.4, 0.35), Vector3(0, 1.85, -0.55), red)
@@ -477,7 +487,9 @@ func _setup_ui() -> void:
 	layer.add_child(_upgrades_panel)
 	for id in GameState.UPGRADES:
 		var button := Button.new()
-		button.pressed.connect(GameState.buy.bind(id))
+		button.pressed.connect(func() -> void:
+			if GameState.buy(id):
+				_play_sfx("bell"))
 		_upgrades_panel.add_child(button)
 		_buttons[id] = button
 
@@ -745,3 +757,38 @@ func _update_welwitschia(delta: float) -> void:
 			p["spin"] += p["rspeed"] * delta
 			var basis := Basis(Vector3.UP, p["spin"])
 			mm.set_instance_transform(i, Transform3D(basis, Vector3(p["x"], p["y"], p["z"])))
+
+
+## ================= ЗВУК =================
+## Достаточно положить 3 файла в assets/audio/ (имена точные!):
+##   tap.wav     — короткий «шорох/свист» на тап (freesound: "cloth swish short")
+##   bell.wav    — один удар колокола (freesound: "church bell single hit")
+##   ambient.ogg — зловещий дрон-луп (freesound: "dark ambient drone loop")
+func _setup_audio() -> void:
+	for key in ["tap", "bell"]:
+		var wav_path := "res://assets/audio/%s.wav" % key
+		if not FileAccess.file_exists(wav_path):
+			continue
+		var stream: AudioStream = load(wav_path)
+		if stream:
+			var p := AudioStreamPlayer.new()
+			p.stream = stream
+			p.volume_db = -6.0
+			add_child(p)
+			_sfx[key] = p
+	var amb_path := "res://assets/audio/ambient.ogg"
+	if FileAccess.file_exists(amb_path):
+		var amb: AudioStream = load(amb_path)
+		if amb:
+			var a := AudioStreamPlayer.new()
+			a.stream = amb
+			a.volume_db = -12.0
+			add_child(a)
+			# без зацикливания в импорте — перезапускаем вручную
+			a.finished.connect(a.play)
+			a.play()
+
+
+func _play_sfx(key: String) -> void:
+	if _sfx.has(key):
+		_sfx[key].play()

@@ -38,9 +38,21 @@ scripts/game_state.gd  — вся логика чисел: валюта, апг�
 scripts/main.gd        — тапы, анимация поклона, UI
 scripts/toon3d.gd      — сборка 3D-демо: свет, персонажи, SubViewport-зеркало
 assets/shaders/        — toon.gdshader (cel shading), mirror.gdshader (отражение+дисторшн)
-assets/models/         — пак Kenney Fantasy Town Kit (CC0, GLB/FBX/OBJ)
-assets/sprites|audio|textures — сюда кладём свои ассеты (латиницей, без пробелов)
+assets/models/         — пак Kenney Fantasy Town Kit (CC0, GLB/FBX/OBJ) + Meshy-персонажи
+assets/audio/          — ЗВУКИ: tap.wav, bell.wav, ambient.ogg (см. ниже)
+assets/sprites|textures — сюда кладём свои ассеты (латиницей, без пробелов)
 ```
+
+## Звук (нужны 3 файла в `assets/audio/`, имена точные)
+
+| Файл | Что искать на freesound.org | Когда играет |
+|---|---|---|
+| `tap.wav` | "cloth swish short" / "whoosh short" | каждый тап |
+| `bell.wav` | "church bell single hit" | апгрейд куплен / новая сюжетная фраза |
+| `ambient.ogg` | "dark ambient drone loop" | фоновый зловещий дрон, играет всегда |
+
+Качай WAV для эффектов (моно, до секунды), OGG для эмбиента. Игра не требует их
+обязательно — без файлов просто тихо.
 
 **Правило проекта:** вся логика чисел — только в `game_state.gd`. UI ничего не считает сам.
 
