@@ -416,6 +416,10 @@ func _setup_mirror() -> void:
 
 	_mirror_mat = ShaderMaterial.new()
 	_mirror_mat.shader = MIRROR_SHADER
+	# Явно задаём параметры — иначе get_shader_parameter вернёт Nil (источник краша)
+	_mirror_mat.set_shader_parameter("invert_amount", 0.0)
+	_mirror_mat.set_shader_parameter("distortion_strength", 0.015)
+	_mirror_mat.set_shader_parameter("distort_speed", 1.0)
 	var tex := ViewportTexture.new()
 	tex.viewport_path = mirror_view.get_path()
 	_mirror_mat.set_shader_parameter("reflection", tex)
@@ -503,9 +507,10 @@ func _setup_ui() -> void:
 	zazerkalie.text = "Зазеркалье: ВЫКЛ"
 	zazerkalie.position = Vector2(24, 24)
 	zazerkalie.pressed.connect(func() -> void:
-		var on: bool = _mirror_mat.get_shader_parameter("invert_amount") < 0.5
+		var cur: Variant = _mirror_mat.get_shader_parameter("invert_amount")
+		var on := (0.0 if cur == null else float(cur)) < 0.5
 		_mirror_mat.set_shader_parameter("invert_amount", 1.0 if on else 0.0)
-		_env.background_color = Color(0.55, 0.35, 0.6) if on else Color(0.10, 0.086, 0.12)
+		_env.background_color = Color(0.45, 0.28, 0.5) if on else Color(0.05, 0.04, 0.075)
 		zazerkalie.text = "Зазеркалье: ВКЛ" if on else "Зазеркалье: ВЫКЛ")
 	layer.add_child(zazerkalie)
 
@@ -865,6 +870,11 @@ func _setup_fallen_leaves() -> void:
 
 func _update_welwitschia(delta: float) -> void:
 	_welw_t += delta
+	# «Дыхание» волшебника: у модели нет анимаций, оживляем процедурно —
+	# едва заметное покачивание и приподнимание на вдохе
+	if _wizard:
+		_wizard.rotation.z = sin(_welw_t * 0.8) * 0.025
+		_wizard.position.y = absf(sin(_welw_t * 1.1)) * 0.03
 	# мерцание свечей
 	for c in _candle_lights:
 		c["light"].light_energy = c["base"] * (
