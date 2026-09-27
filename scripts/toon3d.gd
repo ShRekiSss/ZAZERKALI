@@ -26,6 +26,13 @@ var _bow_t := 0.0
 var _idle_t := 0.0
 var _root_bowing := false
 
+## Welwitschia Goth: бабочки, лепестки, мерцающие свечи
+var _butterflies: Array[Dictionary] = []
+var _petal_mm: MultiMeshInstance3D
+var _petals: Array[Dictionary] = []
+var _candle_lights: Array[Dictionary] = []
+var _welw_t := 0.0
+
 ## UI
 var _counter_label: Label
 var _rate_label: Label
@@ -38,6 +45,7 @@ func _ready() -> void:
 	_setup_environment()
 	_setup_ground()
 	_setup_throne_area()
+	_setup_welwitschia()
 	_setup_wizard()
 	_chelik = _make_character(Color(0.72, 0.64, 0.49))
 	# Композиция вдоль оси Z (портретный экран узкий по X!): челик на переднем плане,
@@ -83,6 +91,7 @@ func _process(delta: float) -> void:
 					_play_bow()
 			else:
 				_root_bow(0.7, 1.0, 0.85) # медленный поклон наклоном
+	_update_welwitschia(delta)
 
 
 func _input(event: InputEvent) -> void:
@@ -299,10 +308,14 @@ func _box(parent: Node3D, size: Vector3, pos: Vector3, mat: Material) -> void:
 func _setup_environment() -> void:
 	_env = Environment.new()
 	_env.background_mode = Environment.BG_COLOR
-	_env.background_color = Color(0.10, 0.086, 0.12)
+	_env.background_color = Color(0.07, 0.055, 0.1)
 	_env.ambient_light_source = Environment.AMBIENT_SOURCE_COLOR
 	_env.ambient_light_color = Color(0.55, 0.5, 0.6)
 	_env.ambient_light_energy = 0.35
+	# Туман Welwitschia Goth: фиолетовая дымка в глубине зала
+	_env.fog_enabled = true
+	_env.fog_light_color = Color(0.14, 0.11, 0.2)
+	_env.fog_density = 0.012
 	var world_env := WorldEnvironment.new()
 	world_env.environment = _env
 	add_child(world_env)
@@ -317,7 +330,7 @@ func _setup_environment() -> void:
 func _setup_ground() -> void:
 	var plane := PlaneMesh.new()
 	plane.size = Vector2(24, 24)
-	_mesh(self, plane, _toon_material(Color(0.18, 0.22, 0.16)), Vector3.ZERO)
+	_mesh(self, plane, _toon_material(Color(0.15, 0.13, 0.18)), Vector3.ZERO)
 
 
 ## Тронный зал: трон по центральной оси на возвышении, ковровая дорожка,
@@ -524,3 +537,211 @@ func _fmt(n: float) -> String:
 	if i == 0:
 		return str(int(n))
 	return "%.2f%s" % [n, suffixes[i]]
+
+
+## ================= WELWITSCHIA GOTH: задник из веб-сцены =================
+## Мёртвый лес над стенами, каменные плиты, канделябры с мерцанием,
+## бабочки с полупрозрачными крыльями, падающие лепестки.
+
+func _setup_welwitschia() -> void:
+	# Каменные плиты поверх пола (у каждой свой оттенок и поворот)
+	var slab_a := _toon_material(Color(0.21, 0.19, 0.26))
+	var slab_b := _toon_material(Color(0.17, 0.15, 0.22))
+	for i in 36:
+		var slab := BoxMesh.new()
+		slab.size = Vector3(1.3, 0.08, 0.95)
+		var a := randf() * TAU
+		var r := randf_range(2.6, 11.0)
+		var mi := _mesh(self, slab, slab_a if i % 5 == 0 else slab_b,
+			Vector3(cos(a) * r, 0.02 + randf() * 0.04, sin(a) * r - 1.0))
+		mi.rotation.y = randf() * PI
+
+	# Мёртвый искривлённый лес за стенами — кроны видны над арками
+	var spots := [
+		Vector3(-6.5, 0, -7.0), Vector3(0.0, 0, -9.5), Vector3(6.5, 0, -7.5),
+		Vector3(-9.0, 0, -3.0), Vector3(9.5, 0, -3.5), Vector3(-3.4, 0, -10.0),
+	]
+	for pos in spots:
+		_make_tree(pos, randf_range(4.5, 6.5))
+
+	# Мышьяково-зелёное свечение из чащи
+	var green := OmniLight3D.new()
+	green.light_color = Color(0.45, 0.55, 0.3)
+	green.omni_range = 11.0
+	green.light_energy = 1.5
+	green.position = Vector3(-5.5, 2.6, -7.5)
+	add_child(green)
+
+	# Канделябры со свечами вдоль дорожки
+	_make_candelabra(Vector3(-1.9, 0.1, 0.8), true)
+	_make_candelabra(Vector3(1.9, 0.1, 0.2), true)
+
+	# Бабочки
+	for i in 5:
+		_make_butterfly(Vector3(randf_range(-3.0, 3.0), randf_range(1.2, 2.4), randf_range(-3.0, 1.5)))
+
+	# Падающие лепестки
+	_setup_petals()
+
+
+## Искривлённый ствол из сегментов + ветви
+func _make_tree(pos: Vector3, h: float) -> void:
+	var root := Node3D.new()
+	root.position = pos
+	root.rotation.y = randf() * TAU
+	add_child(root)
+	var mat := _toon_material(Color(0.2, 0.15, 0.23))
+	var x := 0.0
+	var y := 0.0
+	var r := 0.13 + h * 0.018
+	for i in 5:
+		var seg_h := h / 5.0
+		var tilt := randf_range(-0.3, 0.3)
+		var seg := CylinderMesh.new()
+		seg.top_radius = r * 0.72
+		seg.bottom_radius = r
+		seg.height = seg_h
+		var mi := _mesh(root, seg, mat, Vector3(x, y + seg_h / 2.0, 0.0))
+		mi.rotation.z = tilt
+		x += sin(tilt) * seg_h * 0.8
+		y += seg_h
+		r *= 0.72
+	for b in 3:
+		var bl := randf_range(0.6, 1.1)
+		var branch := CylinderMesh.new()
+		branch.top_radius = 0.012
+		branch.bottom_radius = 0.045
+		branch.height = bl
+		var mi := _mesh(root, branch, mat, Vector3(x, y * randf_range(0.5, 0.9), 0.0))
+		mi.rotation.z = randf_range(0.9, 1.5)
+		mi.rotation.y = randf() * TAU
+
+
+func _make_candelabra(pos: Vector3, with_light: bool) -> void:
+	var g := Node3D.new()
+	g.position = pos
+	add_child(g)
+	var brass := _toon_material(Color(0.55, 0.44, 0.24))
+	var candle_mat := _toon_material(Color(0.82, 0.77, 0.68))
+	var flame_mat := StandardMaterial3D.new()
+	flame_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	flame_mat.albedo_color = Color(1.0, 0.83, 0.5)
+
+	var stem := CylinderMesh.new()
+	stem.top_radius = 0.04
+	stem.bottom_radius = 0.08
+	stem.height = 1.5
+	_mesh(g, stem, brass, Vector3(0, 0.75, 0))
+	var base := CylinderMesh.new()
+	base.top_radius = 0.02
+	base.bottom_radius = 0.2
+	base.height = 0.16
+	_mesh(g, base, brass, Vector3(0, 0.08, 0))
+	var bar := BoxMesh.new()
+	bar.size = Vector3(0.72, 0.05, 0.05)
+	_mesh(g, bar, brass, Vector3(0, 1.52, 0))
+	for cx in [-0.3, 0.0, 0.3]:
+		var cm := CylinderMesh.new()
+		cm.top_radius = 0.03
+		cm.bottom_radius = 0.035
+		cm.height = 0.34
+		_mesh(g, cm, candle_mat, Vector3(cx, 1.7, 0))
+		var fm := CylinderMesh.new()
+		fm.top_radius = 0.0
+		fm.bottom_radius = 0.03
+		fm.height = 0.12
+		_mesh(g, fm, flame_mat, Vector3(cx, 1.93, 0))
+	if with_light:
+		var l := OmniLight3D.new()
+		l.light_color = Color(1.0, 0.75, 0.45)
+		l.omni_range = 6.0
+		l.light_energy = 1.3
+		l.position = Vector3(0, 1.9, 0)
+		g.add_child(l)
+		_candle_lights.append({"light": l, "base": 1.3, "phase": randf() * TAU})
+
+
+func _make_butterfly(pos: Vector3) -> void:
+	var root := Node3D.new()
+	root.position = pos
+	add_child(root)
+	var mat := StandardMaterial3D.new()
+	mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	mat.albedo_color = Color(0.55, 0.35, 0.72, 0.8)
+	mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	mat.cull_mode = BaseMaterial3D.CULL_DISABLED
+	var wing := QuadMesh.new()
+	wing.size = Vector2(0.22, 0.3)
+	var lw := Node3D.new()
+	root.add_child(lw)
+	_mesh(lw, wing, mat, Vector3(-0.11, 0.05, 0))
+	var rw := Node3D.new()
+	root.add_child(rw)
+	_mesh(rw, wing, mat, Vector3(0.11, 0.05, 0))
+	var body := CapsuleMesh.new()
+	body.radius = 0.02
+	body.height = 0.16
+	_mesh(root, body, _toon_material(Color(0.1, 0.08, 0.12)), Vector3.ZERO)
+	_butterflies.append({
+		"root": root, "lw": lw, "rw": rw, "phase": randf() * TAU,
+		"orbit": randf() < 0.4, "home": pos, "r": randf_range(0.5, 1.2),
+	})
+
+
+func _setup_petals() -> void:
+	_petal_mm = MultiMeshInstance3D.new()
+	var mm := MultiMesh.new()
+	mm.transform_format = MultiMesh.TRANSFORM_3D
+	var quad := QuadMesh.new()
+	quad.size = Vector2(0.07, 0.1)
+	var pm := StandardMaterial3D.new()
+	pm.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	pm.albedo_color = Color(0.45, 0.09, 0.14)
+	pm.billboard_mode = BaseMaterial3D.BILLBOARD_ENABLED
+	pm.cull_mode = BaseMaterial3D.CULL_DISABLED
+	quad.material = pm
+	mm.mesh = quad
+	mm.instance_count = 90
+	_petal_mm.multimesh = mm
+	add_child(_petal_mm)
+	for i in 90:
+		var p := {
+			"x": randf_range(-10.0, 10.0), "y": randf_range(0.5, 8.0), "z": randf_range(-9.0, 5.0),
+			"speed": randf_range(0.25, 0.7), "sway": randf_range(0.3, 0.8),
+			"phase": randf() * TAU, "spin": randf() * TAU, "rspeed": randf_range(-2.0, 2.0),
+		}
+		_petals.append(p)
+		mm.set_instance_transform(i, Transform3D(Basis(), Vector3(p["x"], p["y"], p["z"])))
+
+
+func _update_welwitschia(delta: float) -> void:
+	_welw_t += delta
+	# мерцание свечей
+	for c in _candle_lights:
+		c["light"].light_energy = c["base"] * (
+			0.85 + 0.1 * sin(_welw_t * 10.0 + c["phase"])
+			+ 0.05 * sin(_welw_t * 23.0 + c["phase"] * 2.0))
+	# бабочки: трепет крыльев, часть кружит
+	for b in _butterflies:
+		var flap := sin(_welw_t * 9.0 + b["phase"])
+		b["lw"].rotation.y = 0.9 * flap
+		b["rw"].rotation.y = -0.9 * flap
+		if b["orbit"]:
+			var a: float = _welw_t * 0.4 + b["phase"]
+			b["root"].position = b["home"] + Vector3(
+				cos(a) * b["r"], sin(_welw_t * 1.3 + b["phase"]) * 0.2, sin(a) * b["r"])
+			b["root"].rotation.y = -a + PI / 2.0
+	# падающие лепестки
+	if _petal_mm:
+		var mm := _petal_mm.multimesh
+		for i in _petals.size():
+			var p: Dictionary = _petals[i]
+			p["y"] -= p["speed"] * delta
+			p["x"] += sin(_welw_t * p["sway"] + p["phase"]) * 0.3 * delta
+			if p["y"] < 0.12:
+				p["y"] = randf_range(5.0, 8.0)
+				p["x"] = randf_range(-10.0, 10.0)
+				p["z"] = randf_range(-9.0, 5.0)
+			p["spin"] += p["rspeed"] * delta
+			var basis := Basis(Vector3.UP, p["spin"])
+			mm.set_instance_transform(i, Transform3D(basis, Vector3(p["x"], p["y"], p["z"])))
