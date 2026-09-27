@@ -11,6 +11,8 @@ const MODELS_DIR := "res://assets/models/Models/GLB format/"
 ## Meshy-модели пользователя: челик (риг + анимации) и волшебник.
 const CHELIK_GLB := "res://assets/models/meshy/chelik_meshy.glb"
 const WIZARD_GLB := "res://assets/models/meshy/wizard_meshy.glb"
+## Раб-молящийся: жёсткая модель без рига — анимация коленопреклонения процедурная
+const SLAVE_GLB := "res://assets/models/meshy/slave_meshy.glb"
 
 ## Через сколько секунд без тапов челик сам делает поклон.
 const IDLE_BOW_EVERY := 2.5
@@ -35,6 +37,10 @@ var _petal_mm: MultiMeshInstance3D
 var _petals: Array[Dictionary] = []
 var _candle_lights: Array[Dictionary] = []
 var _welw_t := 0.0
+## Раб: плавно опускается на колени и молится (жёсткая модель, цикл 14 с)
+var _slave: Node3D
+var _slave_base_y := 0.0
+var _slave_t := 0.0
 
 ## Звуки: ключ → плеер. Тапы — случайный «шорох ткани» (Kenney CC0),
 ## эмбиент-дрон синтезируется кодом на старте — файлы не нужны.
@@ -65,6 +71,7 @@ func _ready() -> void:
 	# волшебник и трон — в глубине по центральной оси, всё влезает в кадр.
 	_chelik.position.x = 0.0
 	_chelik.position.z = 1.2
+	_setup_slave()
 	_setup_mirror()
 	_setup_camera()
 	_setup_audio()
@@ -107,6 +114,7 @@ func _process(delta: float) -> void:
 			else:
 				_root_bow(0.7, 1.0, 0.85) # медленный поклон наклоном
 	_update_welwitschia(delta)
+	_update_slave(delta)
 
 
 func _input(event: InputEvent) -> void:
@@ -178,6 +186,7 @@ func _setup_wizard() -> void:
 		wizard.position = Vector3(0.0, 0.0, -1.4) # перед троном, СПИНОЙ к камере (смотрит на трон)
 		wizard.rotation.y = 0.0
 		_fit_model(wizard, 2.3)
+		_calm_materials(wizard) # гасим блики/прозрачность — «застрявшие текстуры»
 		_wizard = wizard
 		return
 	# Запасной волшебник из примитивов.
@@ -528,11 +537,13 @@ func _setup_ui() -> void:
 	var gear := Button.new()
 	gear.text = "Настройки звука"
 	gear.set_anchors_and_offsets_preset(Control.PRESET_TOP_RIGHT, Control.PRESET_MODE_MINSIZE, 20)
+	gear.grow_horizontal = Control.GROW_DIRECTION_BEGIN # расти влево, не за экран
 	layer.add_child(gear)
 
 	var panel := PanelContainer.new()
 	panel.visible = false
 	panel.set_anchors_and_offsets_preset(Control.PRESET_TOP_RIGHT, Control.PRESET_MODE_MINSIZE, 58)
+	panel.grow_horizontal = Control.GROW_DIRECTION_BEGIN
 	layer.add_child(panel)
 
 	var margin := MarginContainer.new()
@@ -1072,3 +1083,63 @@ func _play_sfx(key: String) -> void:
 			_tap_players.pick_random().play()
 	elif _sfx.has(key):
 		_sfx[key].play()
+
+
+## ================= РАБ-МОЛЯЩИЙСЯ =================
+## У модели нет рига (один жёсткий меш), поэтому коленопреклонение —
+## анимация всей фигуры: плавно опускается, кланяется, качается в молитве.
+
+func _setup_slave() -> void:
+	var scene: PackedScene = load(SLAVE_GLB)
+	if scene == null:
+		push_warning("Модель раба не найдена: " + SLAVE_GLB)
+		return
+	var root: Node3D = scene.instantiate()
+	root.position = Vector3(-0.9, 0.0, -0.4) # на ковре, левее челика
+	root.rotation.y = 0.0 # лицом к трону (-Z)
+	add_child(root)
+	_fit_model(root, 1.55)
+	_calm_materials(root)
+	_slave_base_y = root.position.y
+	_slave = root
+
+
+func _update_slave(delta: float) -> void:
+	if _slave == null:
+		return
+	# Цикл 14 с: стоит → плавно на колени (3–6) → молится (6–11) → встаёт (11–14)
+	_slave_t = fmod(_slave_t + delta, 14.0)
+	var t := _slave_t
+	var kneel := 0.0
+	if t < 3.0:
+		kneel = 0.0
+	elif t < 6.0:
+		kneel = smoothstep(3.0, 6.0, t)
+	elif t < 11.0:
+		kneel = 1.0
+	else:
+		kneel = 1.0 - smoothstep(11.0, 14.0, t)
+	# опускание на колени + наклон вперёд
+	_slave.position.y = _slave_base_y - kneel * 0.4
+	# молитва: мерные покачивания корпусом, пока стоит на коленях
+	var pray := sin(t * 1.6) * 0.08 * kneel
+	_slave.rotation.x = -kneel * 0.3 + pray
+	# лёгкое дыхание в любой позе
+	_slave.rotation.z = sin(_slave_t * 1.2) * 0.02
+
+
+## Приглушаем PBR Meshy-моделей: без бликов и прозрачности — иначе на тёмной
+## сцене глянцевые пятна выглядят как «застрявшие текстуры»
+func _calm_materials(node: Node) -> void:
+	if node is MeshInstance3D:
+		var mi := node as MeshInstance3D
+		if mi.mesh:
+			for i in mi.mesh.get_surface_count():
+				var mat := mi.mesh.surface_get_material(i)
+				if mat is BaseMaterial3D:
+					var b := mat as BaseMaterial3D
+					b.transparency = BaseMaterial3D.TRANSPARENCY_DISABLED
+					b.roughness = 1.0
+					b.metallic = 0.0
+	for child in node.get_children():
+		_calm_materials(child)
