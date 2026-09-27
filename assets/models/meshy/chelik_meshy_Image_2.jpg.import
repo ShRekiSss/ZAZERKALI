@@ -2,19 +2,19 @@
 
 importer="texture"
 type="CompressedTexture2D"
-uid="uid://kskn0rxn7j8g"
-path="res://.godot/imported/chelik_meshy_0.jpg-213035241f6f0a361c0864822cb2ff5a.ctex"
+uid="uid://cgupaapk0d21w"
+path="res://.godot/imported/chelik_meshy_Image_2.jpg-f5265db581c7e61937b20604db55319e.ctex"
 metadata={
 "vram_texture": false
 }
 generator_parameters={
-"md5": "9d71f5130321c06c5a03058c1c1e0bac"
+"md5": "de4cb923322c9977ab704ac3f7caeee6"
 }
 
 [deps]
 
-source_file="res://assets/models/meshy/chelik_meshy_0.jpg"
-dest_files=["res://.godot/imported/chelik_meshy_0.jpg-213035241f6f0a361c0864822cb2ff5a.ctex"]
+source_file="res://assets/models/meshy/chelik_meshy_Image_2.jpg"
+dest_files=["res://.godot/imported/chelik_meshy_Image_2.jpg-f5265db581c7e61937b20604db55319e.ctex"]
 
 [params]
 

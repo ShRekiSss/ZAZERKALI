@@ -2,19 +2,19 @@
 
 importer="texture"
 type="CompressedTexture2D"
-uid="uid://dihcn7qke2wr7"
-path="res://.godot/imported/wizard_meshy_Image_0.jpg-5cf68f87f8e72260b3ba024a7d8c1f58.ctex"
+uid="uid://4c80u6kn7rd5"
+path="res://.godot/imported/wizard_meshy_1.jpg-846bbd1438d54380ff35694634d4dd02.ctex"
 metadata={
 "vram_texture": false
 }
 generator_parameters={
-"md5": "d72afc347012e5d729ec16e68730fae8"
+"md5": "325aa418b83025b90955594c628d6f0a"
 }
 
 [deps]
 
-source_file="res://assets/models/meshy/wizard_meshy_Image_0.jpg"
-dest_files=["res://.godot/imported/wizard_meshy_Image_0.jpg-5cf68f87f8e72260b3ba024a7d8c1f58.ctex"]
+source_file="res://assets/models/meshy/wizard_meshy_1.jpg"
+dest_files=["res://.godot/imported/wizard_meshy_1.jpg-846bbd1438d54380ff35694634d4dd02.ctex"]
 
 [params]
 
