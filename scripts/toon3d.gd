@@ -62,6 +62,9 @@ var _rate_label: Label
 var _story_label: Label
 var _upgrades_panel: GridContainer
 var _buttons := {}
+var _prestige_button: Button
+## Все интерактивные элементы UI: тап по ним не должен быть поклоном.
+var _tap_blockers: Array[Control] = []
 
 
 func _ready() -> void:
@@ -132,9 +135,9 @@ func _input(event: InputEvent) -> void:
 		pos = event.position
 	if not tapped:
 		return
-	# Тапы по панелям UI — не поклоны.
-	for panel: Control in [_upgrades_panel, _story_label]:
-		if panel.get_global_rect().has_point(pos):
+	# Тапы по панелям и кнопкам UI — не поклоны (невидимые не блокируют).
+	for control: Control in _tap_blockers:
+		if control.visible and control.get_global_rect().has_point(pos):
 			return
 	_idle_t = 0.0
 	GameState.add_tap()
@@ -403,11 +406,9 @@ func _setup_throne_area() -> void:
 	_box(throne, Vector3(0.3, 0.9, 1.2), Vector3(0.75, 1.05, 0), red)
 	_box(throne, Vector3(1.55, 0.25, 0.45), Vector3(0, 3.1, -0.55), gold)
 
-	# Колонны со знамёнами по бокам трона.
+	# Колонны по бокам трона (знамёна убраны — читались как случайные красные пятна)
 	_prop("pillar-stone.glb", Vector3(-2.7, 0.0, -2.6), 0.0, Color(0.52, 0.51, 0.55))
 	_prop("pillar-stone.glb", Vector3(2.7, 0.0, -2.6), 0.0, Color(0.52, 0.51, 0.55))
-	_prop("banner-red.glb", Vector3(-2.7, 1.6, -2.2), 0.0, Color(0.5, 0.16, 0.2))
-	_prop("banner-red.glb", Vector3(2.7, 1.6, -2.2), 0.0, Color(0.5, 0.16, 0.2))
 
 	# Фонари вдоль дорожки + кривое дерево (жутко-милая деталь Fran Bow).
 	_prop("lantern.glb", Vector3(1.7, 0.0, 1.4), 0.0, Color(0.25, 0.22, 0.26))
@@ -513,6 +514,8 @@ func _setup_ui() -> void:
 	_upgrades_panel.add_theme_constant_override("v_separation", 12)
 	_upgrades_panel.columns = 2
 	layer.add_child(_upgrades_panel)
+	_tap_blockers.append(_upgrades_panel)
+	_tap_blockers.append(_story_label)
 	for id in GameState.UPGRADES:
 		var button := Button.new()
 		button.pressed.connect(func() -> void:
@@ -531,6 +534,7 @@ func _setup_ui() -> void:
 		_env.background_color = Color(0.45, 0.28, 0.5) if on else Color(0.05, 0.04, 0.075)
 		zazerkalie.text = "Зазеркалье: ВКЛ" if on else "Зазеркалье: ВЫКЛ")
 	layer.add_child(zazerkalie)
+	_tap_blockers.append(zazerkalie)
 
 	var flat := Button.new()
 	flat.text = "2D-режим"
@@ -538,6 +542,7 @@ func _setup_ui() -> void:
 	flat.pressed.connect(
 		func() -> void: get_tree().change_scene_to_file("res://scenes/main.tscn"))
 	layer.add_child(flat)
+	_tap_blockers.append(flat)
 
 	# --- Настройки звука ---
 	var gear := Button.new()
@@ -545,12 +550,14 @@ func _setup_ui() -> void:
 	gear.set_anchors_and_offsets_preset(Control.PRESET_TOP_RIGHT, Control.PRESET_MODE_MINSIZE, 20)
 	gear.grow_horizontal = Control.GROW_DIRECTION_BEGIN # расти влево, не за экран
 	layer.add_child(gear)
+	_tap_blockers.append(gear)
 
 	var panel := PanelContainer.new()
 	panel.visible = false
 	panel.set_anchors_and_offsets_preset(Control.PRESET_TOP_RIGHT, Control.PRESET_MODE_MINSIZE, 58)
 	panel.grow_horizontal = Control.GROW_DIRECTION_BEGIN
 	layer.add_child(panel)
+	_tap_blockers.append(panel)
 
 	var margin := MarginContainer.new()
 	for side in ["margin_left", "margin_right", "margin_top", "margin_bottom"]:
@@ -583,10 +590,27 @@ func _setup_ui() -> void:
 
 	gear.pressed.connect(func() -> void: panel.visible = not panel.visible)
 
+	# --- Кнопка престижа (появляется при MIRROR_COST благосклонности) ---
+	_prestige_button = Button.new()
+	_prestige_button.text = "Войти в Зазеркалье"
+	_prestige_button.visible = false
+	_prestige_button.position = Vector2(215, 470)
+	_prestige_button.size = Vector2(290, 60)
+	_prestige_button.add_theme_font_size_override("font_size", 20)
+	_prestige_button.pressed.connect(_do_prestige)
+	layer.add_child(_prestige_button)
+	_tap_blockers.append(_prestige_button)
+
 
 func _update_ui() -> void:
 	_counter_label.text = "Благосклонность: %s" % _fmt(GameState.favor)
 	_rate_label.text = "%s/сек · сила поклона +%d" % [_fmt(GameState.auto_rate()), GameState.tap_power()]
+	if GameState.prestige_count > 0:
+		_rate_label.text += " · престиж ×%.1f" % GameState.prestige_multiplier()
+	# Кнопка престижа: видна только когда зеркало «созрело»
+	_prestige_button.visible = GameState.can_prestige()
+	if GameState.can_prestige():
+		_prestige_button.text = "Войти в Зазеркалье (×%.1f навсегда)" % pow(1.5, GameState.prestige_count + 1)
 	for id in _buttons:
 		var u: Dictionary = GameState.UPGRADES[id]
 		var lvl := int(GameState.levels.get(id, 0))
@@ -610,6 +634,22 @@ func _show_story(text: String) -> void:
 	tween.tween_interval(5.0)
 	tween.tween_property(_story_label, "modulate:a", 0.0, 1.0)
 	tween.tween_callback(func() -> void: _story_label.visible = false)
+
+
+## Вход в Зазеркалье: сброс всего, но постоянный множитель + зловещий флеш
+func _do_prestige() -> void:
+	if not GameState.can_prestige():
+		return
+	GameState.do_prestige()
+	_play_sfx("creak")
+	_show_story("Ты входишь в Зазеркалье. Благосклонность утекла сквозь стекло — но теперь всё ×%.1f." % GameState.prestige_multiplier())
+	_mirror_mat.set_shader_parameter("invert_amount", 1.0)
+	_env.background_color = Color(0.45, 0.28, 0.5)
+	var timer := get_tree().create_timer(4.0)
+	timer.timeout.connect(func() -> void:
+		if _mirror_mat and _env:
+			_mirror_mat.set_shader_parameter("invert_amount", 0.0)
+			_env.background_color = Color(0.05, 0.04, 0.075))
 
 
 ## 1234 → "1.23K", 5600000 → "5.60M" — чтобы цифры не уезжали за экран.

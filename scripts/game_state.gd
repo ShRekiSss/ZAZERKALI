@@ -34,13 +34,14 @@ const STORY := [
 	{"at": 5000.0, "text": "Во сне ты видел зеркало. В зеркале — трон. На троне — ты."},
 	{"at": 20000.0, "text": "Волшебник впервые улыбнулся. Улыбка была чуть шире, чем надо."},
 	{"at": 80000.0, "text": "Голоса в стенах считают вместе с тобой. Они радуются каждому числу."},
+	{"at": 100000.0, "text": "Порог Зеркала открыт. За ним — зал. В зале — трон."},
 	{"at": 300000.0, "text": "Зеркало в западном крыле запотело. Изнутри."},
 	{"at": 1000000.0, "text": "Ты понимаешь: благосклонность не растёт. Она перетекает. Из тебя."},
 	{"at": 4000000.0, "text": "В глубине зала есть дверь, которой нет на планах замка."},
 	{"at": 15000000.0, "text": "Эхо твоих поклонов возвращается на полтакта раньше, чем нужно."},
 	{"at": 60000000.0, "text": "Волшебник шепчет: «Ещё немного, и ты увидишь, кому кланяешься на самом деле»."},
 	{"at": 250000000.0, "text": "В зеркале толпа кланяется тебе. Ты не помнишь, чтобы останавливался."},
-	{"at": 1000000000.0, "text": "Порог Зеркала открыт. За ним — зал. В зале — трон."},
+	{"at": 1000000000.0, "text": "Ты возвращаешься к Зеркалу. Стекло помнит тебя — и уже отсчитывает заново."},
 	{"at": 5000000000.0, "text": "ЗАЗЕРКАЛЬЕ ждёт. Кланяйся. Кланяйся. Кланяйся."},
 ]
 
@@ -48,6 +49,29 @@ var favor: float = 0.0
 var levels := {}
 var story_unlocked := 0
 var total_taps := 0
+## Сколько раз пройдено Зазеркалье: каждый вход даёт постоянный множитель ×1.5
+var prestige_count := 0
+
+
+## Постоянный множитель ко всем поступлениям благосклонности
+func prestige_multiplier() -> float:
+	return pow(1.5, prestige_count)
+
+
+## Зеркало доступно, когда благосклонности достаточно
+func can_prestige() -> bool:
+	return favor >= MIRROR_COST
+
+
+## Престиж: всё обнуляется, множитель растёт навсегда
+func do_prestige() -> void:
+	if not can_prestige():
+		return
+	prestige_count += 1
+	favor = 0.0
+	levels = {}
+	changed.emit()
+	save()
 
 var _save_timer := 0.0
 
@@ -88,14 +112,14 @@ func buy(id: String) -> bool:
 
 
 func add_tap() -> void:
-	favor += tap_power()
+	favor += tap_power() * prestige_multiplier()
 	total_taps += 1
 	_after_gain()
 
 
 func _process(delta: float) -> void:
 	if auto_rate() > 0.0:
-		favor += auto_rate() * delta
+		favor += auto_rate() * prestige_multiplier() * delta
 		_after_gain()
 	_save_timer += delta
 	if _save_timer >= SAVE_EVERY_SEC:
@@ -120,6 +144,7 @@ func save() -> void:
 		"levels": levels,
 		"story_unlocked": story_unlocked,
 		"total_taps": total_taps,
+		"prestige_count": prestige_count,
 		"time": Time.get_unix_time_from_system(),
 	}
 	var file := FileAccess.open(SAVE_PATH, FileAccess.WRITE)
@@ -139,13 +164,14 @@ func load_data() -> void:
 	favor = float(data.get("favor", 0.0))
 	story_unlocked = int(data.get("story_unlocked", 0))
 	total_taps = int(data.get("total_taps", 0))
+	prestige_count = int(data.get("prestige_count", 0))
 	var saved_levels: Variant = data.get("levels", {})
 	if typeof(saved_levels) == TYPE_DICTIONARY:
 		levels = saved_levels
 	# Оффлайн-доход: пока игры не было, толпа кланялась сама.
 	var elapsed: float = Time.get_unix_time_from_system() - float(data.get("time", 0.0))
 	elapsed = minf(elapsed, OFFLINE_CAP_HOURS * 3600.0)
-	var earned := auto_rate() * elapsed
+	var earned := auto_rate() * prestige_multiplier() * elapsed
 	if earned > 0.0:
 		favor += earned
 		_check_story.call_deferred()
