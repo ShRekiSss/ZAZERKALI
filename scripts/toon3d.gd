@@ -67,12 +67,18 @@ var _tex_petal: ImageTexture
 var _tex_leaf: ImageTexture
 
 ## UI
+var _ui_layer: CanvasLayer
 var _counter_label: Label
 var _rate_label: Label
 var _story_label: Label
-var _upgrades_panel: GridContainer
 var _buttons := {}
 var _prestige_button: Button
+## Лавка (магазин): выдвижная панель под свайп влево.
+var _shop_backdrop: ColorRect
+## Свайп: драг запущен, старт, «один свайп = одно действие».
+var _drag_active := false
+var _drag_start := Vector2.ZERO
+var _swipe_used := false
 ## Все интерактивные элементы UI: тап по ним не должен быть поклоном.
 var _tap_blockers: Array[Control] = []
 
@@ -138,6 +144,21 @@ func _process(delta: float) -> void:
 
 
 func _input(event: InputEvent) -> void:
+	# Свайпы: драг запущен тачем, «дожимается» горизонтальным движением.
+	# emulated_touch работает и на ПК (мышь → тач), так что свайп везде как на телефоне.
+	if event is InputEventScreenTouch:
+		_drag_active = event.pressed
+		if event.pressed:
+			_drag_start = event.position
+			_swipe_used = false
+	elif event is InputEventScreenDrag and _drag_active and not _swipe_used:
+		var dx: float = event.position.x - _drag_start.x
+		if dx < -120.0 and not _shop_backdrop.visible:
+			_swipe_used = true
+			_open_shop()
+		elif dx > 120.0 and _shop_backdrop.visible:
+			_swipe_used = true
+			_close_shop()
 	var tapped := false
 	var pos := Vector2.ZERO
 	if event is InputEventScreenTouch and event.pressed:
@@ -197,13 +218,27 @@ func _play_bow(idle := false) -> void:
 	# Наклон вперёд вокруг ног (пивот от _fit_model — на полу).
 	t.tween_property(_chelik, "rotation:x", -depth, down) \
 		.set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
-	# «Утопание»: в нижней точке ещё чуть оседает — поклон читается как поклон.
-	t.tween_property(_chelik, "rotation:x", -depth - 0.04, hold) \
-		.set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_IN_OUT)
+	# «Утопание» + Fran Bow: в нижней точке поклон ведёт себя «неправильно».
+	if idle:
+		# Медленный ритуал: жуткий наклон вбок, голова как будто слушает.
+		t.set_parallel(true)
+		t.tween_property(_chelik, "rotation:x", -depth - 0.04, hold) \
+			.set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_IN_OUT)
+		t.tween_property(_chelik, "rotation:z", 0.12, hold * 0.7) \
+			.set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_IN_OUT)
+		t.set_parallel(false)
+	else:
+		t.tween_property(_chelik, "rotation:x", -depth - 0.04, hold) \
+			.set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_IN_OUT)
+		# Нервный тик: два резких микродёрганья, и только потом возврат.
+		t.tween_property(_chelik, "rotation:x", -depth + 0.05, 0.035)
+		t.tween_property(_chelik, "rotation:x", -depth - 0.02, 0.04)
 	# Возврат с отскоком: TRANS_BACK даёт прогиб назад в конце, расправление.
 	t.set_parallel(true)
 	t.tween_property(_chelik, "rotation:x", 0.0, up) \
 		.set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
+	t.tween_property(_chelik, "rotation:z", 0.0, up * 0.6) \
+		.set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
 	t.tween_property(_chelik, "scale:y", _chelik_base_scale.y, up) \
 		.set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
 	t.tween_property(_chelik, "scale:x", _chelik_base_scale.x, up) \
@@ -564,6 +599,7 @@ func _setup_tap_burst() -> void:
 func _setup_ui() -> void:
 	var layer := CanvasLayer.new()
 	add_child(layer)
+	_ui_layer = layer
 
 	_counter_label = Label.new()
 	_counter_label.set_anchors_and_offsets_preset(Control.PRESET_CENTER_TOP)
@@ -594,21 +630,68 @@ func _setup_ui() -> void:
 	_story_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	layer.add_child(_story_label)
 
-	_upgrades_panel = GridContainer.new()
-	_upgrades_panel.set_anchors_and_offsets_preset(Control.PRESET_BOTTOM_WIDE)
-	_upgrades_panel.position = Vector2(20, -290)
-	_upgrades_panel.add_theme_constant_override("h_separation", 12)
-	_upgrades_panel.add_theme_constant_override("v_separation", 12)
-	_upgrades_panel.columns = 2
-	layer.add_child(_upgrades_panel)
-	_tap_blockers.append(_upgrades_panel)
-	_tap_blockers.append(_story_label)
+	# --- Подсказка про лавку ---
+	var hint := Label.new()
+	hint.text = "← свайп: открыть ЛАВКУ"
+	hint.set_anchors_and_offsets_preset(Control.PRESET_CENTER_BOTTOM)
+	hint.position = Vector2(-200.0, -160.0)
+	hint.size = Vector2(400.0, 32.0)
+	hint.add_theme_font_size_override("font_size", 18)
+	hint.modulate = Color(0.55, 0.5, 0.62)
+	hint.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	layer.add_child(hint)
+
+	# --- ЛАВКА (магазин): свайп влево открывает, вправо закрывает ---
+	_shop_backdrop = ColorRect.new()
+	_shop_backdrop.color = Color(0.05, 0.03, 0.07, 0.97)
+	_shop_backdrop.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	_shop_backdrop.visible = false
+	layer.add_child(_shop_backdrop)
+	_tap_blockers.append(_shop_backdrop)
+
+	var close := Button.new()
+	close.text = "✕"
+	close.position = Vector2(648.0, 20.0)
+	close.size = Vector2(52.0, 52.0)
+	close.add_theme_font_size_override("font_size", 26)
+	close.pressed.connect(_close_shop)
+	_shop_backdrop.add_child(close)
+
+	var title := Label.new()
+	title.text = "ЛАВКА"
+	title.position = Vector2(0.0, 56.0)
+	title.size = Vector2(720.0, 72.0)
+	title.add_theme_font_size_override("font_size", 52)
+	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_shop_backdrop.add_child(title)
+
+	var sub := Label.new()
+	sub.text = "товары Волшебника · свайп вправо — уйти"
+	sub.position = Vector2(0.0, 124.0)
+	sub.size = Vector2(720.0, 32.0)
+	sub.add_theme_font_size_override("font_size", 18)
+	sub.modulate = Color(0.6, 0.55, 0.68)
+	sub.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_shop_backdrop.add_child(sub)
+
+	var scroll := ScrollContainer.new()
+	scroll.position = Vector2(24.0, 170.0)
+	scroll.size = Vector2(672.0, 1060.0)
+	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	_shop_backdrop.add_child(scroll)
+	# Ряд наклонной «полки» — тень, чтобы товары не висели в воздухе.
+	var shelf := VBoxContainer.new()
+	shelf.add_theme_constant_override("separation", 14)
+	scroll.add_child(shelf)
 	for id in GameState.UPGRADES:
 		var button := Button.new()
+		button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		button.custom_minimum_size = Vector2(670.0, 88.0)
+		button.add_theme_font_size_override("font_size", 22)
 		button.pressed.connect(func() -> void:
 			if GameState.buy(id):
 				_play_sfx("coins"))
-		_upgrades_panel.add_child(button)
+		shelf.add_child(button)
 		_buttons[id] = button
 
 	var zazerkalie := Button.new()
@@ -741,6 +824,31 @@ func _do_prestige() -> void:
 		if _mirror_mat and _env:
 			_mirror_mat.set_shader_parameter("invert_amount", 0.0)
 			_env.background_color = Color(0.05, 0.04, 0.075))
+
+
+## --- Лавка: открытие/закрытие -----------------------------------------
+
+func _open_shop() -> void:
+	if _shop_backdrop.visible:
+		return
+	_play_sfx("creak")
+	# «Нож из Alice»: блестящая полоса прорезает экран и за ней открывается лавка.
+	var blade := ColorRect.new()
+	blade.color = Color(0.93, 0.9, 0.96)
+	blade.size = Vector2(18.0, 1700.0)
+	blade.position = Vector2(-70.0, -200.0)
+	blade.rotation_degrees = 8.0
+	_ui_layer.add_child(blade)
+	var wipe := create_tween()
+	wipe.tween_property(blade, "position:x", 800.0, 0.28) \
+		.set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_IN_OUT)
+	wipe.tween_callback(func() -> void: _shop_backdrop.visible = true)
+	wipe.tween_property(blade, "modulate:a", 0.0, 0.22)
+	wipe.tween_callback(blade.queue_free)
+
+
+func _close_shop() -> void:
+	_shop_backdrop.visible = false
 
 
 ## 1234 → "1.23K", 5600000 → "5.60M" — чтобы цифры не уезжали за экран.

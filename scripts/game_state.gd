@@ -23,6 +23,7 @@ const UPGRADES := {
 	"crowd": {"name": "Толпа зевак", "base_cost": 100.0, "growth": 1.15, "tap": 0, "auto": 1.0},
 	"monks": {"name": "Монашеский хор", "base_cost": 1200.0, "growth": 1.17, "tap": 0, "auto": 8.0},
 	"relic": {"name": "Реликвия храма", "base_cost": 9000.0, "growth": 1.2, "tap": 0, "auto": 40.0},
+	"knife": {"name": "Нож из Лавки", "base_cost": 60000.0, "growth": 1.24, "tap": 250, "auto": 0.0},
 }
 
 ## Сюжет: показывается по очереди, когда благосклонность доходит до порога "at".
