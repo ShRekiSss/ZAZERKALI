@@ -13,6 +13,13 @@ var _bowing := false
 var _buttons := {}
 var _idle_t := 0.0
 
+## Дедуп тапов: мышь и эмулированный из неё тач приходят в один кадр.
+var _last_tap_ms := -1000
+var _last_tap_pos := Vector2.ONE * 1e9
+
+## Текущий твин сюжетной надписи.
+var _story_tween: Tween
+
 ## Через сколько секунд без тапов челик сам делает медленный поклон.
 const IDLE_BOW_EVERY := 2.2
 
@@ -51,6 +58,12 @@ func _input(event: InputEvent) -> void:
 		pos = event.position
 	if not tapped:
 		return
+	# Дубликат (мышь + эмулированный тач из одного клика) — игнорируем.
+	var now_ms := Time.get_ticks_msec()
+	if now_ms - _last_tap_ms < 50 and pos.distance_to(_last_tap_pos) < 6.0:
+		return
+	_last_tap_ms = now_ms
+	_last_tap_pos = pos
 	# Тапы по кнопкам (апгрейды, переход в 3D) — это нажатия, а не поклоны.
 	if upgrades_panel.get_global_rect().has_point(pos) \
 			or toon3d_button.get_global_rect().has_point(pos):
@@ -100,14 +113,16 @@ func _update_ui() -> void:
 
 
 func _show_story(text: String) -> void:
+	if _story_tween and _story_tween.is_valid():
+		_story_tween.kill()
 	story_label.text = "«%s»" % text
 	story_label.visible = true
 	story_label.modulate.a = 0.0
-	var tween := create_tween()
-	tween.tween_property(story_label, "modulate:a", 1.0, 0.6)
-	tween.tween_interval(5.0)
-	tween.tween_property(story_label, "modulate:a", 0.0, 1.0)
-	tween.tween_callback(func() -> void: story_label.visible = false)
+	_story_tween = create_tween()
+	_story_tween.tween_property(story_label, "modulate:a", 1.0, 0.6)
+	_story_tween.tween_interval(5.0)
+	_story_tween.tween_property(story_label, "modulate:a", 0.0, 1.0)
+	_story_tween.tween_callback(func() -> void: story_label.visible = false)
 
 
 ## 1234 → "1.23K", 5600000 → "5.60M" — чтобы цифры не уезжали за экран.

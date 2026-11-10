@@ -57,6 +57,14 @@ var _shake_amp := 0.0
 const SHAKE_MAX := 0.05
 var _cam_base: Vector3
 
+## Дедуп тапов: мышь и эмулированный из неё тач приходят в один кадр —
+## без этого каждый клик на ПК засчитывается дважды.
+var _last_tap_ms := -1000
+var _last_tap_pos := Vector2.ONE * 1e9
+
+## Текущий твин сюжетной надписи — чтобы пачка фраз не мешала анимации твинам.
+var _story_tween: Tween
+
 ## Процедурные текстуры (крыло/лепесток/лист) — рисуются один раз при старте
 var _tex_wing: ImageTexture
 var _tex_petal: ImageTexture
@@ -150,6 +158,13 @@ func _input(event: InputEvent) -> void:
 		pos = event.position
 	if not tapped:
 		return
+	# Один физический клик = события мыши И эмулированный тач. Дубликат из
+	# того же места в течение 50 мс игнорируем (человек так тапать не может).
+	var now_ms := Time.get_ticks_msec()
+	if now_ms - _last_tap_ms < 50 and pos.distance_to(_last_tap_pos) < 6.0:
+		return
+	_last_tap_ms = now_ms
+	_last_tap_pos = pos
 	# Тапы по панелям и кнопкам UI — не поклоны (невидимые не блокируют).
 	for control: Control in _tap_blockers:
 		if control.visible and control.get_global_rect().has_point(pos):
@@ -681,14 +696,18 @@ func _update_ui() -> void:
 
 
 func _show_story(text: String) -> void:
+	# При перепрыгивании нескольких порогов за кадр предыдущий твин убиваем
+	# (иначе две анимации одновременно дёргают одну надпись).
+	if _story_tween and _story_tween.is_valid():
+		_story_tween.kill()
 	_story_label.text = "«%s»" % text
 	_story_label.visible = true
 	_story_label.modulate.a = 0.0
-	var tween := create_tween()
-	tween.tween_property(_story_label, "modulate:a", 1.0, 0.6)
-	tween.tween_interval(5.0)
-	tween.tween_property(_story_label, "modulate:a", 0.0, 1.0)
-	tween.tween_callback(func() -> void: _story_label.visible = false)
+	_story_tween = create_tween()
+	_story_tween.tween_property(_story_label, "modulate:a", 1.0, 0.6)
+	_story_tween.tween_interval(5.0)
+	_story_tween.tween_property(_story_label, "modulate:a", 0.0, 1.0)
+	_story_tween.tween_callback(func() -> void: _story_label.visible = false)
 
 
 ## Вход в Зазеркалье: сброс всего, но постоянный множитель + зловещий флеш
