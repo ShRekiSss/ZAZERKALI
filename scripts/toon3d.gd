@@ -11,8 +11,6 @@ const MODELS_DIR := "res://assets/models/Models/GLB format/"
 ## Meshy-модели пользователя: челик (риг + анимации) и волшебник.
 const CHELIK_GLB := "res://assets/models/meshy/chelik_meshy.glb"
 const WIZARD_GLB := "res://assets/models/meshy/wizard_meshy.glb"
-## Раб-молящийся: жёсткая модель без рига — анимация коленопреклонения процедурная
-const SLAVE_GLB := "res://assets/models/meshy/slave_meshy.glb"
 
 ## Через сколько секунд без тапов челик сам делает поклон.
 const IDLE_BOW_EVERY := 2.5
@@ -25,6 +23,7 @@ var _chelik_anim: AnimationPlayer
 var _idle_anim := ""
 var _bow_anim := ""
 var _wizard: Node3D
+var _wizard_anim: AnimationPlayer
 var _mirror_mat: ShaderMaterial
 var _env: Environment
 var _bow_t := 0.0
@@ -37,10 +36,6 @@ var _petal_mm: MultiMeshInstance3D
 var _petals: Array[Dictionary] = []
 var _candle_lights: Array[Dictionary] = []
 var _welw_t := 0.0
-## Раб: плавно опускается на колени и молится (жёсткая модель, цикл 14 с)
-var _slave: Node3D
-var _slave_base_y := 0.0
-var _slave_t := 0.0
 ## База по вертикали для «дыхания» волшебника (модель от центра таза)
 var _wizard_base_y := 0.0
 ## Камера сцены — для отсечки лепестков возле объектива
@@ -92,7 +87,6 @@ func _ready() -> void:
 	# волшебник и трон — в глубине по центральной оси, всё влезает в кадр.
 	_chelik.position.x = 0.0
 	_chelik.position.z = 1.2
-	_setup_slave()
 	_setup_mirror()
 	_setup_camera()
 	_setup_tap_burst()
@@ -144,7 +138,6 @@ func _process(delta: float) -> void:
 			else:
 				_root_bow(0.7, 1.0, 0.85) # медленный поклон наклоном
 	_update_welwitschia(delta)
-	_update_slave(delta)
 
 
 func _input(event: InputEvent) -> void:
@@ -228,9 +221,18 @@ func _setup_wizard() -> void:
 		wizard.rotation.y = 0.0
 		_fit_model(wizard, 2.3)
 		_calm_materials(wizard) # гасим блики/прозрачность — «застрявшие текстуры»
+		# Анимации из GLB (если Meshy-экспорт их вложил): зацикливаем первую как idle,
+		# иначе волшебник застывает в Т-позе; процедурное «дыхание» остаётся поверх.
+		var w_anim := _find_animation_player(wizard)
+		if w_anim and w_anim.get_animation_list().size() > 0:
+			var anims := w_anim.get_animation_list()
+			w_anim.get_animation(anims[0]).loop_mode = Animation.LOOP_LINEAR
+			w_anim.play(anims[0])
+			_wizard_anim = w_anim
 		_wizard_base_y = wizard.position.y # ноги на полу (модель от центра таза!)
 		_wizard = wizard
 		return
+
 	# Запасной волшебник из примитивов.
 	var fallback := Node3D.new()
 	fallback.position = Vector3(0.0, 0.0, -1.4)
@@ -378,7 +380,7 @@ func _setup_environment() -> void:
 	_env.background_color = Color(0.05, 0.04, 0.075)
 	_env.ambient_light_source = Environment.AMBIENT_SOURCE_COLOR
 	_env.ambient_light_color = Color(0.45, 0.4, 0.52)
-	_env.ambient_light_energy = 0.22
+	_env.ambient_light_energy = 0.3 # чуть ярче: сцена тонула в черноте
 	# Зловещий фиолетовый туман погуще
 	_env.fog_enabled = true
 	_env.fog_light_color = Color(0.09, 0.07, 0.14)
@@ -421,10 +423,10 @@ func _setup_throne_area() -> void:
 	# Лестница к трону.
 	_prop("stairs-wide-stone.glb", Vector3(0.0, 0.0, -1.15), 0.0, Color(0.5, 0.49, 0.52))
 
-	# Ковровая дорожка от трона к зрителю.
+	# Ковровая дорожка от трона до самой камеры — портрет не «проваливается» в чёрный.
 	var carpet := Node3D.new()
 	add_child(carpet)
-	_box(carpet, Vector3(1.8, 0.04, 5.6), Vector3(0.0, 0.02, 1.6),
+	_box(carpet, Vector3(2.6, 0.04, 8.0), Vector3(0.0, 0.02, 2.2),
 		_toon_material(Color(0.28, 0.07, 0.11)))
 
 	# Трон: каменный подиум + красное кресло с золотым навершием (по центру).
@@ -771,9 +773,10 @@ func _setup_welwitschia() -> void:
 	green.position = Vector3(-5.5, 2.6, -7.5)
 	add_child(green)
 
-	# Канделябры со свечами вдоль дорожки
-	_make_candelabra(Vector3(-1.9, 0.1, 0.8), true)
-	_make_candelabra(Vector3(1.9, 0.1, 0.2), true)
+	# Канделябры со свечами вдоль дорожки — глубже в зал,
+	# иначе в портретном кадре свеча упиралась в край экрана и выглядела гигантской.
+	_make_candelabra(Vector3(-2.55, 0.1, -1.1), true)
+	_make_candelabra(Vector3(2.55, 0.1, -1.7), true)
 
 	# Бабочки
 	for i in 5:
@@ -1049,9 +1052,11 @@ func _update_welwitschia(delta: float) -> void:
 	# «Дыхание» волшебника: у модели нет анимаций, оживляем процедурно.
 	# ВАЖНО: модель начинается от центра таза — прибавляем к базовой высоте
 	# от _fit_model, а не перезаписываем (иначе проваливается под пол)!
+	# Если у Meshy-модели свои анимации — не трогаем корень, чтобы не воевать с ними.
 	if _wizard:
 		_wizard.rotation.z = sin(_welw_t * 0.8) * 0.025
-		_wizard.position.y = _wizard_base_y + absf(sin(_welw_t * 1.1)) * 0.03
+		if _wizard_anim == null:
+			_wizard.position.y = _wizard_base_y + absf(sin(_welw_t * 1.1)) * 0.03
 	# мерцание свечей
 	for c in _candle_lights:
 		c["light"].light_energy = c["base"] * (
@@ -1209,50 +1214,6 @@ func _play_sfx(key: String) -> void:
 			_tap_players.pick_random().play()
 	elif _sfx.has(key):
 		_sfx[key].play()
-
-
-## ================= РАБ-МОЛЯЩИЙСЯ =================
-## У модели нет рига (один жёсткий меш), поэтому коленопреклонение —
-## анимация всей фигуры: плавно опускается, кланяется, качается в молитве.
-
-func _setup_slave() -> void:
-	var scene: PackedScene = load(SLAVE_GLB)
-	if scene == null:
-		push_warning("Модель раба не найдена: " + SLAVE_GLB)
-		return
-	var root: Node3D = scene.instantiate()
-	root.position = Vector3(-1.2, 0.0, 0.4) # на ковре, левее челика
-	root.rotation.y = 0.0 # лицом к трону (-Z)
-	add_child(root)
-	_fit_model(root, 1.55)
-	_calm_materials(root)
-	_slave_base_y = root.position.y
-	_slave = root
-
-
-func _update_slave(delta: float) -> void:
-	if _slave == null:
-		return
-	# Цикл 14 с: стоит → плавно на колени (1–3) → молится (3–12) → встаёт (12–14).
-	# Погружение умеренное (0.3) — модель от центра таза, глубже «зароет» ноги в пол.
-	_slave_t = fmod(_slave_t + delta, 14.0)
-	var t := _slave_t
-	var kneel := 0.0
-	if t < 1.0:
-		kneel = 0.0
-	elif t < 3.0:
-		kneel = smoothstep(1.0, 3.0, t)
-	elif t < 12.0:
-		kneel = 1.0
-	else:
-		kneel = 1.0 - smoothstep(12.0, 14.0, t)
-	# опускание на колени + сильный наклон вперёд (прострация)
-	_slave.position.y = _slave_base_y - kneel * 0.3
-	# молитва: мерные покачивания корпусом, пока стоит на коленях
-	var pray := sin(t * 1.6) * 0.1 * kneel
-	_slave.rotation.x = -kneel * 0.45 + pray
-	# лёгкое дыхание в любой позе
-	_slave.rotation.z = sin(_slave_t * 1.2) * 0.02
 
 
 ## Приглушаем PBR Meshy-моделей: без бликов и прозрачности — иначе на тёмной
