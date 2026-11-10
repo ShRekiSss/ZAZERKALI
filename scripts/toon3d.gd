@@ -20,6 +20,7 @@ const SETTINGS_PATH := "user://settings.cfg"
 
 var _chelik: Node3D
 var _chelik_anim: AnimationPlayer
+var _chelik_base_scale := Vector3.ONE
 var _idle_anim := ""
 var _bow_anim := ""
 var _wizard: Node3D
@@ -127,16 +128,12 @@ func _process(delta: float) -> void:
 	elif _shake_amp != 0.0:
 		_shake_amp = 0.0
 		_cam.position = _cam_base
-	# Пассивный поклон: если игрок не тапает, челик кланяется сам.
+	# Пассивный поклон: если игрок не тапает, челик кланяется сам (медленная версия).
 	if not _root_bowing:
 		_idle_t += delta
 		if _idle_t >= IDLE_BOW_EVERY:
 			_idle_t = 0.0
-			if _chelik_anim:
-				if _chelik_anim.current_animation != _bow_anim:
-					_play_bow()
-			else:
-				_root_bow(0.7, 1.0, 0.85) # медленный поклон наклоном
+			_play_bow(true)
 	_update_welwitschia(delta)
 
 
@@ -169,44 +166,61 @@ func _input(event: InputEvent) -> void:
 	if _tap_burst:
 		_tap_burst.restart()
 	_shake_amp = minf(_shake_amp + 0.03, SHAKE_MAX)
-	if _chelik_anim:
-		_play_bow()
-	else:
-		_root_bow(0.12, 0.45, 1.1) # быстрый резкий поклон
+	_play_bow() # быстрый резкий поклон-хореография
 
 
 ## --- Поклоны -----------------------------------------------------------
 
-func _play_bow() -> void:
-	if _chelik_anim == null:
-		return
-	# Спам-тапы: не дёргаем плеер stop/play (из-за этого челик зависал в T-позе),
-	# а просто отматываем текущую анимацию в начало.
-	if _chelik_anim.current_animation == _bow_anim and _chelik_anim.is_playing():
-		_chelik_anim.seek(0.0, true)
-	else:
-		_chelik_anim.stop()
-		_chelik_anim.play(_bow_anim)
-
-
-func _on_bow_finished(_anim_name: String) -> void:
-	# После поклона возвращаемся в idle-анимацию.
-	if _idle_anim != "" and _chelik_anim.current_animation != _idle_anim:
-		_chelik_anim.play(_idle_anim)
-
-
-func _root_bow(down := 0.12, up := 0.45, depth := 1.1) -> void:
+## Поклон-хореография (процедурный, не зависит от анимаций GLB):
+## приседание-антисипация (squash) → глубокий поклон с «утопанием» в нижней
+## точке → возврат с отскоком (overshoot) → расправление в idle.
+func _play_bow(idle := false) -> void:
 	if _root_bowing:
 		return
 	_root_bowing = true
-	# Челик стоит лицом к -Z (к трону), поклон — наклон вперёд вокруг оси X.
-	var tween := create_tween()
-	tween.tween_property(_chelik, "rotation:x", -depth, down) \
+	if _chelik_anim:
+		_chelik_anim.pause() # позой управляем сами, idle включим после
+	var depth := 0.8 if idle else 1.35
+	var prep := 0.3 if idle else 0.08
+	var down := 0.45 if idle else 0.14
+	var hold := 0.35 if idle else 0.06
+	var up := 0.6 if idle else 0.32
+	var base := _chelik.scale
+	var t := create_tween()
+	# Антисипация: слегка приседает — сплющивается и чуть расширяется.
+	t.set_parallel(true)
+	t.tween_property(_chelik, "scale:y", _chelik_base_scale.y * 0.92, prep) \
 		.set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
-	tween.tween_interval(0.05)
-	tween.tween_property(_chelik, "rotation:x", 0.0, up) \
-		.set_trans(Tween.TRANS_BOUNCE).set_ease(Tween.EASE_OUT)
-	tween.finished.connect(func() -> void: _root_bowing = false)
+	t.tween_property(_chelik, "scale:x", _chelik_base_scale.x * 1.04, prep) \
+		.set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
+	t.set_parallel(false)
+	# Наклон вперёд вокруг ног (пивот от _fit_model — на полу).
+	t.tween_property(_chelik, "rotation:x", -depth, down) \
+		.set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
+	# «Утопание»: в нижней точке ещё чуть оседает — поклон читается как поклон.
+	t.tween_property(_chelik, "rotation:x", -depth - 0.04, hold) \
+		.set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_IN_OUT)
+	# Возврат с отскоком: TRANS_BACK даёт прогиб назад в конце, расправление.
+	t.set_parallel(true)
+	t.tween_property(_chelik, "rotation:x", 0.0, up) \
+		.set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
+	t.tween_property(_chelik, "scale:y", _chelik_base_scale.y, up) \
+		.set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
+	t.tween_property(_chelik, "scale:x", _chelik_base_scale.x, up) \
+		.set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
+	t.set_parallel(false)
+	t.finished.connect(func() -> void:
+		_chelik.rotation = Vector3(0.0, _chelik.rotation.y, 0.0)
+		_chelik.scale = base
+		_root_bowing = false
+		if _chelik_anim:
+			_chelik_anim.play(_idle_anim))
+
+
+func _on_bow_finished(_anim_name: String) -> void:
+	# После GLB-поклона возвращаемся в idle-анимацию.
+	if _idle_anim != "" and _chelik_anim.current_animation != _idle_anim:
+		_chelik_anim.play(_idle_anim)
 
 
 ## --- Персонажи ---------------------------------------------------------
@@ -261,6 +275,7 @@ func _make_character(_color: Color) -> Node3D:
 		root.rotation.y = PI # лицом к трону (-Z); спиной — поменять знак
 		add_child(root)
 		_fit_model(root, 1.7)
+		_chelik_base_scale = root.scale
 		_chelik_anim = _find_animation_player(root)
 		if _chelik_anim and _chelik_anim.get_animation_list().size() > 0:
 			var anims := _chelik_anim.get_animation_list()
