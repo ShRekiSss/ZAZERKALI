@@ -520,8 +520,8 @@ func _setup_tap_burst() -> void:
 	_tap_burst.initial_velocity_min = 1.8
 	_tap_burst.initial_velocity_max = 3.6
 	_tap_burst.gravity = Vector3(0, -5.0, 0)
-	_tap_burst.scale_min = 0.6
-	_tap_burst.scale_max = 1.0
+	_tap_burst.scale_amount_min = 0.6
+	_tap_burst.scale_amount_max = 1.0
 	_tap_burst.emission_shape = CPUParticles3D.EMISSION_SHAPE_SPHERE
 	_tap_burst.emission_sphere_radius = 0.22
 	# Лепесток-текстура уже нарисована задником Welwitschia — переиспользуем.
