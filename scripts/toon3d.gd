@@ -51,6 +51,12 @@ var _cam: Camera3D
 var _sfx := {}
 var _tap_players: Array[AudioStreamPlayer] = []
 
+## Juice: всплеск частиц при тапе + затухающая тряска камеры
+var _tap_burst: CPUParticles3D
+var _shake_amp := 0.0
+const SHAKE_MAX := 0.05
+var _cam_base: Vector3
+
 ## Процедурные текстуры (крыло/лепесток/лист) — рисуются один раз при старте
 var _tex_wing: ImageTexture
 var _tex_petal: ImageTexture
@@ -81,6 +87,7 @@ func _ready() -> void:
 	_setup_slave()
 	_setup_mirror()
 	_setup_camera()
+	_setup_tap_burst()
 	_setup_audio()
 	_setup_ui()
 	GameState.changed.connect(_update_ui)
@@ -110,6 +117,14 @@ func _diag() -> void:
 
 
 func _process(delta: float) -> void:
+	# Затухающая тряска камеры после тапа.
+	if _shake_amp > 0.001:
+		_shake_amp *= pow(0.05, delta) # почти полный спад за ~0.3 с
+		_cam.position = _cam_base + Vector3(
+			randf_range(-1.0, 1.0), randf_range(-1.0, 1.0), 0.0) * _shake_amp
+	elif _shake_amp != 0.0:
+		_shake_amp = 0.0
+		_cam.position = _cam_base
 	# Пассивный поклон: если игрок не тапает, челик кланяется сам.
 	if not _root_bowing:
 		_idle_t += delta
@@ -142,6 +157,10 @@ func _input(event: InputEvent) -> void:
 	_idle_t = 0.0
 	GameState.add_tap()
 	_play_sfx("tap")
+	# Juice: всплеск частиц + короткая тряска камеры (сильнее при спаме не становится)
+	if _tap_burst:
+		_tap_burst.restart()
+	_shake_amp = minf(_shake_amp + 0.03, SHAKE_MAX)
 	if _chelik_anim:
 		_play_bow()
 	else:
@@ -470,6 +489,42 @@ func _setup_camera() -> void:
 	cam.look_at(Vector3(0.0, 1.2, -0.8))
 	cam.current = true
 	_cam = cam
+	_cam_base = cam.position
+
+
+## Тап-всплеск: разовый выброс лепестков у ног челика.
+func _setup_tap_burst() -> void:
+	_tap_burst = CPUParticles3D.new()
+	_tap_burst.one_shot = true
+	_tap_burst.emitting = false
+	_tap_burst.amount = 14
+	_tap_burst.lifetime = 0.55
+	_tap_burst.explosiveness = 1.0
+	_tap_burst.direction = Vector3(0, 1, 0)
+	_tap_burst.spread = 55.0
+	_tap_burst.initial_velocity_min = 1.8
+	_tap_burst.initial_velocity_max = 3.6
+	_tap_burst.gravity = Vector3(0, -5.0, 0)
+	_tap_burst.scale_min = 0.6
+	_tap_burst.scale_max = 1.0
+	_tap_burst.emission_shape = CPUParticles3D.EMISSION_SHAPE_SPHERE
+	_tap_burst.emission_sphere_radius = 0.22
+	# Лепесток-текстура уже нарисована задником Welwitschia — переиспользуем.
+	var quad := QuadMesh.new()
+	quad.size = Vector2(0.09, 0.12)
+	var pm := StandardMaterial3D.new()
+	pm.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	if _tex_petal:
+		pm.albedo_texture = _tex_petal
+		pm.albedo_color = Color(1.0, 0.75, 0.9)
+	pm.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA_SCISSOR
+	pm.alpha_scissor_threshold = 0.5
+	pm.billboard_mode = BaseMaterial3D.BILLBOARD_ENABLED
+	pm.cull_mode = BaseMaterial3D.CULL_DISABLED
+	quad.material = pm
+	_tap_burst.mesh = quad
+	_tap_burst.position = Vector3(0.0, 0.9, 1.2) # у ног челика
+	add_child(_tap_burst)
 
 
 ## --- UI кликера --------------------------------------------------------
