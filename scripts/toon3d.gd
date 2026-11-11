@@ -657,13 +657,13 @@ func _setup_ui() -> void:
 	close.pressed.connect(_close_shop)
 	_shop_backdrop.add_child(close)
 
-	var title := Label.new()
-	title.text = "ЛАВКА"
-	title.position = Vector2(0.0, 56.0)
-	title.size = Vector2(720.0, 72.0)
-	title.add_theme_font_size_override("font_size", 52)
-	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	_shop_backdrop.add_child(title)
+	var shop_title := Label.new()
+	shop_title.text = "ЛАВКА"
+	shop_title.position = Vector2(0.0, 56.0)
+	shop_title.size = Vector2(720.0, 72.0)
+	shop_title.add_theme_font_size_override("font_size", 52)
+	shop_title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_shop_backdrop.add_child(shop_title)
 
 	var sub := Label.new()
 	sub.text = "товары Волшебника · свайп вправо — уйти"
