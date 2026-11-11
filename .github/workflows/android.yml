@@ -31,15 +31,16 @@ jobs:
       - name: Прописать Java SDK в настройках Godot
         run: |
           mkdir -p "$HOME/.config/godot"
-          ES="$HOME/.config/godot/editor_settings-4.tres"
           godot --headless --editor --quit >/dev/null 2>&1 || true
-          if [ ! -s "$ES" ]; then
+          ES=$(ls -1 "$HOME/.config/godot"/editor_settings-*.tres 2>/dev/null | head -n1)
+          if [ -z "$ES" ]; then
+            ES="$HOME/.config/godot/editor_settings-4.tres"
             printf '[gd_resource type="EditorSettings" format=3]\n\n[resource]\n' > "$ES"
           fi
           grep -q "export/android/java_sdk_path" "$ES" || \
             printf 'export/android/java_sdk_path = "%s"\n' "$JAVA_HOME" >> "$ES"
-          echo "--- editor_settings-4.tres (head) ---"
-          head -c 600 "$ES"
+          echo "settings file: $ES"
+          head -c 500 "$ES"
 
       # В образе barichello/godot-ci нет Android-шаблонов экспорта — качаем с релиза.
       - name: Android export templates (4.6)
