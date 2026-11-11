@@ -37,10 +37,11 @@ jobs:
       # В образе barichello/godot-ci нет Android-шаблонов экспорта — качаем с релиза.
       - name: Android export templates (4.6)
         run: |
-          command -v unzip >/dev/null || { apt-get update -qq && apt-get install -y -qq unzip; }
+          apt-get update -qq && apt-get install -y -qq unzip curl >/dev/null
           mkdir -p "$HOME/.local/share/godot/export_templates/4.6.stable"
           curl -sL -o /tmp/templates.tpz \
             https://github.com/godotengine/godot/releases/download/4.6-stable/Godot_v4.6-stable_export_templates.tpz
+          ls -la /tmp/templates.tpz
           unzip -o /tmp/templates.tpz "templates/android_debug.apk" "templates/android_release.apk" -d /tmp
           mv /tmp/templates/android_debug.apk /tmp/templates/android_release.apk \
             "$HOME/.local/share/godot/export_templates/4.6.stable/"
