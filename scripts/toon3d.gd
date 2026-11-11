@@ -53,6 +53,13 @@ var _shake_amp := 0.0
 const SHAKE_MAX := 0.05
 var _cam_base: Vector3
 
+## Нож из Лавки: появляется в руке челика после покупки (крепится к кости кисти).
+var _knife: Node3D
+## Кровь при тапе (когда нож куплен): брызги + пятна на полу.
+var _blood: CPUParticles3D
+var _blood_stains: Array[MeshInstance3D] = []
+const BLOOD_STAIN_MAX := 24
+
 ## Дедуп тапов: мышь и эмулированный из неё тач приходят в один кадр —
 ## без этого каждый клик на ПК засчитывается дважды.
 var _last_tap_ms := -1000
@@ -61,10 +68,12 @@ var _last_tap_pos := Vector2.ONE * 1e9
 ## Текущий твин сюжетной надписи — чтобы пачка фраз не мешала анимации твинам.
 var _story_tween: Tween
 
-## Процедурные текстуры (крыло/лепесток/лист) — рисуются один раз при старте
+## Процедурные текстуры (крыло/лепесток/лист/кровь) — рисуются один раз при старте
 var _tex_wing: ImageTexture
 var _tex_petal: ImageTexture
 var _tex_leaf: ImageTexture
+var _tex_blood_drop: ImageTexture
+var _tex_blood_stain: ImageTexture
 
 ## UI
 var _ui_layer: CanvasLayer
@@ -97,6 +106,8 @@ func _ready() -> void:
 	_setup_mirror()
 	_setup_camera()
 	_setup_tap_burst()
+	_setup_blood()
+	_setup_knife()
 	_setup_audio()
 	_setup_ui()
 	GameState.changed.connect(_update_ui)
@@ -183,8 +194,13 @@ func _input(event: InputEvent) -> void:
 	_idle_t = 0.0
 	GameState.add_tap()
 	_play_sfx("tap")
-	# Juice: всплеск частиц + короткая тряска камеры (сильнее при спаме не становится)
-	if _tap_burst:
+	# Juice: всплеск частиц + короткая тряска камеры (сильнее при спаме не становится).
+	# С ножом вместо лепестков — брызги крови и пятно на полу.
+	if GameState.levels.get("knife", 0) > 0:
+		if _blood:
+			_blood.restart()
+		_spawn_blood_stain()
+	elif _tap_burst:
 		_tap_burst.restart()
 	_shake_amp = minf(_shake_amp + 0.03, SHAKE_MAX)
 	_play_bow() # быстрый резкий поклон-хореография
@@ -594,6 +610,177 @@ func _setup_tap_burst() -> void:
 	add_child(_tap_burst)
 
 
+## --- Нож из Лавки + кровь ---------------------------------------------
+
+## Процедурный нож (по мотивам Alice: Madness Returns): стальное лезвие,
+## латунная гарда, тёмная рукоять. Лезвие вдоль +Y — у Mixamo-кости кисти
+## ось Y ведёт от запястья к пальцам, так что нож «лежит» в ладони.
+func _make_knife() -> Node3D:
+	var knife := Node3D.new()
+	var steel := StandardMaterial3D.new()
+	steel.albedo_color = Color(0.82, 0.85, 0.9)
+	steel.metallic = 0.85
+	steel.roughness = 0.25
+	var brass := StandardMaterial3D.new()
+	brass.albedo_color = Color(0.55, 0.42, 0.2)
+	brass.metallic = 0.7
+	brass.roughness = 0.4
+	var grip := _toon_material(Color(0.24, 0.07, 0.06))
+
+	var blade := PrismMesh.new()
+	blade.size = Vector3(0.04, 0.3, 0.014)
+	_mesh(knife, blade, steel, Vector3(0, 0.17, 0))
+	var guard := BoxMesh.new()
+	guard.size = Vector3(0.1, 0.022, 0.03)
+	_mesh(knife, guard, brass, Vector3(0, 0.01, 0))
+	var handle := CylinderMesh.new()
+	handle.top_radius = 0.016
+	handle.bottom_radius = 0.022
+	handle.height = 0.09
+	_mesh(knife, handle, grip, Vector3(0, -0.04, 0))
+	var pommel := SphereMesh.new()
+	pommel.radius = 0.018
+	pommel.height = 0.036
+	_mesh(knife, pommel, brass, Vector3(0, -0.09, 0))
+	return knife
+
+
+func _find_skeleton(node: Node) -> Skeleton3D:
+	if node is Skeleton3D:
+		return node
+	for child in node.get_children():
+		var found := _find_skeleton(child)
+		if found:
+			return found
+	return null
+
+
+func _setup_knife() -> void:
+	_knife = _make_knife()
+	_knife.visible = GameState.levels.get("knife", 0) > 0
+	var skel := _find_skeleton(_chelik)
+	if skel:
+		# Кость правой кисти: строгие кандидаты, потом любая «hand» с «right/r».
+		var candidates := ["mixamorig:RightHand", "RightHand", "hand_r", "Hand_R"]
+		var bone := ""
+		for c in candidates:
+			if skel.find_bone(c) != -1:
+				bone = c
+				break
+		if bone == "":
+			for i in skel.get_bone_count():
+				var n := skel.get_bone_name(i).to_lower()
+				if n.contains("hand") and (n.contains("right") or n.ends_with("_r")):
+					bone = skel.get_bone_name(i)
+					break
+		if bone != "":
+			var attach := BoneAttachment3D.new()
+			attach.bone_name = bone
+			skel.add_child(attach)
+			attach.add_child(_knife)
+			return # кость наследует масштаб модели — больше ничего не нужно
+	# Запасной вариант: приматываем к корню на высоте кисти.
+	_chelik.add_child(_knife)
+	_knife.position = Vector3(0.3, 1.05, -0.05)
+
+
+## Брызги крови: one-shot выброс тёмно-красных капель у челика.
+func _setup_blood() -> void:
+	_tex_blood_drop = _make_blood_drop_texture()
+	_blood = CPUParticles3D.new()
+	_blood.one_shot = true
+	_blood.emitting = false
+	_blood.amount = 20
+	_blood.lifetime = 0.8
+	_blood.explosiveness = 1.0
+	_blood.direction = Vector3(0, 1, 0)
+	_blood.spread = 65.0
+	_blood.initial_velocity_min = 2.0
+	_blood.initial_velocity_max = 4.5
+	_blood.gravity = Vector3(0, -9.0, 0)
+	_blood.scale_amount_min = 0.7
+	_blood.scale_amount_max = 1.4
+	_blood.emission_shape = CPUParticles3D.EMISSION_SHAPE_SPHERE
+	_blood.emission_sphere_radius = 0.12
+	var quad := QuadMesh.new()
+	quad.size = Vector2(0.06, 0.09)
+	var pm := StandardMaterial3D.new()
+	pm.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	pm.albedo_texture = _tex_blood_drop
+	pm.albedo_color = Color(0.5, 0.02, 0.06)
+	pm.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA_SCISSOR
+	pm.alpha_scissor_threshold = 0.5
+	pm.billboard_mode = BaseMaterial3D.BILLBOARD_ENABLED
+	pm.cull_mode = BaseMaterial3D.CULL_DISABLED
+	quad.material = pm
+	_blood.mesh = quad
+	_blood.position = Vector3(0.0, 1.15, 1.1) # у челика (он на z = 1.2)
+	add_child(_blood)
+
+
+## Пятно крови на полу: лежащий квад с процедурной текстурой-кляксой.
+## Старые пятна (больше BLOOD_STAIN_MAX) удаляются.
+func _spawn_blood_stain() -> void:
+	if _tex_blood_stain == null:
+		_tex_blood_stain = _make_blood_stain_texture()
+	var quad := QuadMesh.new()
+	quad.size = Vector2(0.5, 0.5) * randf_range(0.6, 1.3)
+	var pm := StandardMaterial3D.new()
+	pm.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	pm.albedo_texture = _tex_blood_stain
+	pm.albedo_color = Color(0.75, 0.0, 0.04, randf_range(0.75, 0.95))
+	pm.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	pm.cull_mode = BaseMaterial3D.CULL_DISABLED
+	var mi := MeshInstance3D.new()
+	mi.mesh = quad
+	mi.material_override = pm
+	mi.position = Vector3(randf_range(-0.9, 0.9), 0.045, randf_range(0.2, 1.9))
+	mi.rotation_degrees = Vector3(-90.0, randf() * 360.0, 0.0)
+	add_child(mi)
+	_blood_stains.append(mi)
+	if _blood_stains.size() > BLOOD_STAIN_MAX:
+		_blood_stains[0].queue_free()
+		_blood_stains.pop_front()
+
+
+## Капля крови: вытянутый вниз эллипс с плотным ядром.
+func _make_blood_drop_texture() -> ImageTexture:
+	var size := 32
+	var img := Image.create(size, size, false, Image.FORMAT_RGBA8)
+	for y in size:
+		for x in size:
+			var fx := (float(x) / size - 0.5) * 2.0
+			var fy := (float(y) / size - 0.5) * 2.0
+			var d := fx * fx * 2.2 + fy * fy
+			if d <= 1.0:
+				img.set_pixel(x, y, Color(0.9, 0.02, 0.08, 0.6 + 0.4 * (1.0 - d)))
+	return ImageTexture.create_from_image(img)
+
+
+## Клякса: центральное пятно + россыпь брызг вокруг (случайная при каждом старте).
+func _make_blood_stain_texture() -> ImageTexture:
+	var size := 128
+	var img := Image.create(size, size, false, Image.FORMAT_RGBA8)
+	var blobs: Array[Vector3] = [] # x, y, радиус
+	blobs.append(Vector3(64, 64, randf_range(22, 30)))
+	for i in randi_range(6, 10):
+		var ang := randf() * TAU
+		var dist := randf_range(0.35, 0.85) * size * 0.5
+		blobs.append(Vector3(
+			64.0 + cos(ang) * dist, 64.0 + sin(ang) * dist, randf_range(3.0, 10.0)))
+	for y in size:
+		for x in size:
+			var best := 0.0
+			for b in blobs:
+				var d := Vector2(float(x) - b.x, float(y) - b.y).length() / b.z
+				if d <= 1.0:
+					best = maxf(best, 1.0 - d)
+			if best > 0.0:
+				var shade := 0.75 + 0.25 * best
+				img.set_pixel(x, y, Color(shade, 0.02, 0.05, clampf(best * 1.6, 0.0, 0.95)))
+	return ImageTexture.create_from_image(img)
+
+
 ## --- UI кликера --------------------------------------------------------
 
 func _setup_ui() -> void:
@@ -779,6 +966,9 @@ func _update_ui() -> void:
 		_rate_label.text += " · престиж ×%.1f" % GameState.prestige_multiplier()
 	# Кнопка престижа: видна только когда зеркало «созрело»
 	_prestige_button.visible = GameState.can_prestige()
+	# Нож из Лавки: появляется в руке, когда куплен.
+	if _knife:
+		_knife.visible = GameState.levels.get("knife", 0) > 0
 	if GameState.can_prestige():
 		_prestige_button.text = "Войти в Зазеркалье (×%.1f навсегда)" % pow(1.5, GameState.prestige_count + 1)
 	for id in _buttons:
