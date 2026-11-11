@@ -64,7 +64,8 @@ jobs:
       - name: Export APK
         run: |
           mkdir -p builds
-          godot --headless --export-debug "Android" builds/zazerkali-debug.apk
+          godot --headless --verbose --export-debug "Android" builds/zazerkali-debug.apk > /tmp/export.log 2>&1 || { tail -120 /tmp/export.log; exit 1; }
+          tail -40 /tmp/export.log
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
