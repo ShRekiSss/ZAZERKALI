@@ -18,6 +18,34 @@ jobs:
         with:
           set-safe-directory: true
 
+      # Godot для подписи APK требует JDK 17; в образе его нет/не прописан.
+      - name: Java SDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      # Godot читает путь к Java из своих настроек редактора, а не из $JAVA_HOME.
+      - name: Прописать Java SDK в настройках Godot
+        run: |
+          mkdir -p "$HOME/.config/godot"
+          printf 'config_version=5\n\n[export]\n\nandroid/java_sdk_path="%s"\n' "$JAVA_HOME" \
+            > "$HOME/.config/godot/editor_settings-4.tres"
+          echo "--- editor_settings-4.tres ---"
+          cat "$HOME/.config/godot/editor_settings-4.tres"
+
+      # В образе barichello/godot-ci нет Android-шаблонов экспорта — качаем с релиза.
+      - name: Android export templates (4.6)
+        run: |
+          command -v unzip >/dev/null || { apt-get update -qq && apt-get install -y -qq unzip; }
+          mkdir -p "$HOME/.local/share/godot/export_templates/4.6.stable"
+          curl -sL -o /tmp/templates.tpz \
+            https://github.com/godotengine/godot/releases/download/4.6-stable/Godot_v4.6-stable_export_templates.tpz
+          unzip -o /tmp/templates.tpz "templates/android_debug.apk" "templates/android_release.apk" -d /tmp
+          mv /tmp/templates/android_debug.apk /tmp/templates/android_release.apk \
+            "$HOME/.local/share/godot/export_templates/4.6.stable/"
+          ls -la "$HOME/.local/share/godot/export_templates/4.6.stable"
+
       - name: Debug keystore
         run: |
           mkdir -p .android
