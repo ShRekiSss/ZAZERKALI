@@ -26,13 +26,20 @@ jobs:
           java-version: 17
 
       # Godot читает путь к Java из своих настроек редактора, а не из $JAVA_HOME.
+      # Файл editor_settings-4.tres — это .tres-ресурс: сначала просим Godot сам
+      # сгенерировать корректный файл, затем дописываем в него java_sdk_path.
       - name: Прописать Java SDK в настройках Godot
         run: |
           mkdir -p "$HOME/.config/godot"
-          printf 'config_version=5\n\n[export]\n\nandroid/java_sdk_path="%s"\n' "$JAVA_HOME" \
-            > "$HOME/.config/godot/editor_settings-4.tres"
-          echo "--- editor_settings-4.tres ---"
-          cat "$HOME/.config/godot/editor_settings-4.tres"
+          ES="$HOME/.config/godot/editor_settings-4.tres"
+          godot --headless --editor --quit >/dev/null 2>&1 || true
+          if [ ! -s "$ES" ]; then
+            printf '[gd_resource type="EditorSettings" format=3]\n\n[resource]\n' > "$ES"
+          fi
+          grep -q "export/android/java_sdk_path" "$ES" || \
+            printf 'export/android/java_sdk_path = "%s"\n' "$JAVA_HOME" >> "$ES"
+          echo "--- editor_settings-4.tres (head) ---"
+          head -c 600 "$ES"
 
       # В образе barichello/godot-ci нет Android-шаблонов экспорта — качаем с релиза.
       - name: Android export templates (4.6)
