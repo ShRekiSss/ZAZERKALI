@@ -52,6 +52,7 @@ var _tap_burst: CPUParticles3D
 var _shake_amp := 0.0
 const SHAKE_MAX := 0.05
 var _cam_base: Vector3
+var _cam_drift_t := 0.0
 
 ## Нож из Лавки: появляется в руке челика после покупки (крепится к кости кисти).
 var _knife: Node3D
@@ -108,6 +109,8 @@ func _ready() -> void:
 	_setup_tap_burst()
 	_setup_blood()
 	_setup_knife()
+	_setup_dust()
+	_setup_vignette()
 	_setup_audio()
 	_setup_ui()
 	GameState.changed.connect(_update_ui)
@@ -144,7 +147,10 @@ func _process(delta: float) -> void:
 			randf_range(-1.0, 1.0), randf_range(-1.0, 1.0), 0.0) * _shake_amp
 	elif _shake_amp != 0.0:
 		_shake_amp = 0.0
-		_cam.position = _cam_base
+	_cam_drift_t += delta
+	if _shake_amp <= 0.001:
+		_cam.position = _cam_base + Vector3(
+			sin(_cam_drift_t * 0.4) * 0.06, sin(_cam_drift_t * 0.27) * 0.05, 0.0)
 	# Пассивный поклон: если игрок не тапает, челик кланяется сам (медленная версия).
 	if not _root_bowing:
 		_idle_t += delta
@@ -464,6 +470,61 @@ func _setup_environment() -> void:
 	sun.shadow_enabled = true
 	add_child(sun)
 
+
+## --- Атмосфера -------------------------------------------------------------------
+
+## Пылинки в лучах света над тронной частью: медленный дрейф, дешёвые CPU-частицы,
+## совместимы с GL Compatibility.
+func _setup_dust() -> void:
+	var dust := CPUParticles3D.new()
+	dust.amount = 40
+	dust.lifetime = 9.0
+	dust.preprocess = 9.0
+	dust.emission_shape = CPUParticles3D.EMISSION_SHAPE_BOX
+	dust.emission_box_extents = Vector3(3.2, 1.6, 3.0)
+	dust.direction = Vector3(0.2, 0.0, -0.1)
+	dust.spread = 20.0
+	dust.gravity = Vector3(0.0, 0.02, 0.0)
+	dust.initial_velocity_min = 0.03
+	dust.initial_velocity_max = 0.12
+	dust.scale_amount_min = 0.4
+	dust.scale_amount_max = 1.0
+	var quad := QuadMesh.new()
+	quad.size = Vector2(0.025, 0.025)
+	var material := StandardMaterial3D.new()
+	material.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	material.albedo_color = Color(0.9, 0.85, 0.75, 0.28)
+	material.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	material.billboard_mode = BaseMaterial3D.BILLBOARD_ENABLED
+	quad.material = material
+	dust.mesh = quad
+	dust.position = Vector3(0.0, 1.8, 0.4)
+	add_child(dust)
+
+## Виньетка поверх 3D и под UI: затемнение краёв кадра через canvas-шейдер.
+func _setup_vignette() -> void:
+	var layer := CanvasLayer.new()
+	layer.layer = -1
+	add_child(layer)
+	var vignette_shader := Shader.new()
+	vignette_shader.code = """
+shader_type canvas_item;
+
+uniform float strength : hint_range(0.0, 1.0) = 0.38;
+
+void fragment() {
+	vec2 offset = UV - vec2(0.5);
+	float edge = smoothstep(0.38, 0.85, length(offset) * 1.45);
+	COLOR = vec4(0.03, 0.02, 0.05, edge * strength);
+}
+"""
+	var vignette_material := ShaderMaterial.new()
+	vignette_material.shader = vignette_shader
+	var rect := ColorRect.new()
+	rect.set_anchors_preset(Control.PRESET_FULL_RECT)
+	rect.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	rect.material = vignette_material
+	layer.add_child(rect)
 
 func _setup_ground() -> void:
 	var plane := PlaneMesh.new()

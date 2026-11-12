@@ -21,10 +21,13 @@ void fragment() {
 }
 
 void light() {
-	// Жёсткий порог: либо освещённая сторона, либо тень, без градиента.
-	float lit = step(0.0, dot(NORMAL, LIGHT));
-	DIFFUSE_LIGHT += shadow_color * LIGHT_COLOR * ATTENUATION;
-	DIFFUSE_LIGHT += (ALBEDO - shadow_color) * LIGHT_COLOR * ATTENUATION * lit;
+	// Трёхполосная заливка: тень, полутон, свет. Резкие пороги дают читаемый cel-стайл.
+	float ndl = dot(NORMAL, LIGHT);
+	float lit = smoothstep(0.02, 0.12, ndl);
+	float mid = smoothstep(0.28, 0.42, ndl);
+	DIFFUSE_LIGHT += shadow_color * LIGHT_COLOR * ATTENUATION * (1.0 - mid);
+	DIFFUSE_LIGHT += mix(shadow_color, ALBEDO, 0.5) * LIGHT_COLOR * ATTENUATION * (mid - lit);
+	DIFFUSE_LIGHT += ALBEDO * LIGHT_COLOR * ATTENUATION * lit;
 	// Rim light — подсветка края силуэта, «доводка» рисованного вида.
 	float rim = pow(1.0 - clamp(dot(NORMAL, VIEW), 0.0, 1.0), 3.0);
 	DIFFUSE_LIGHT += rim_color * rim * rim_strength * ATTENUATION;
